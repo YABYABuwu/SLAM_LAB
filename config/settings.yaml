@@ -1,0 +1,99 @@
+# ทุกระยะเป็นเมตร, มุมเป็นองศา, ความเร็วเลื่อนเป็น m/s, ความเร็วหมุนเป็น deg/s
+connection:
+  type: ap                 # ap = ต่อ Wi-Fi ของหุ่นยนต์; sta = ผ่านเราเตอร์; rndis = USB
+
+motion:
+  position_tolerance_m: 0.05  # ถือว่าถึงจุดเมื่อห่างไม่เกิน 5 ซม.
+  angle_tolerance_deg: 3      # ยอมให้มุมคลาดเคลื่อนได้ 3 องศา
+  timeout_s: 15               # เวลาสูงสุดต่อ waypoint
+  sample_timeout_s: 1.0       # หาก position/attitude เก่ากว่านี้ ให้หยุด
+  control_period_s: 0.1       # ระยะเวลาระหว่างคำสั่งความเร็ว
+  max_speed_m_s: 0.35         # เพดานความเร็วรวมของแกน x/y
+  max_turn_deg_s: 45          # เพดานความเร็วหมุน
+  hold_heading: true          # yaw: null = รักษามุมเดิมข้าม waypoint ไม่ให้ drift สะสม
+  pid:
+    x: {kp: 0.9, ki: 0.0, kd: 0.0}    # ควบคุมตำแหน่งแกน x
+    y: {kp: 0.9, ki: 0.0, kd: 0.0}    # ควบคุมตำแหน่งแกน y
+    yaw: {kp: 1.2, ki: 0.0, kd: 0.0}  # ควบคุมมุมตัวรถ
+
+logging:
+  directory: data/raw      # โฟลเดอร์ CSV; อ้างอิงจาก TemplateProject
+  preview_duration_s: 3    # เมื่อ mission ปิด ให้เก็บข้อมูลนานกี่วินาทีก่อนออก
+  queue_max_rows: 1000      # จำนวนแถวสูงสุดที่รอเขียนใน RAM; เต็มแล้วข้ามแถวใหม่
+  history_max_samples: 2000 # จำนวนจุดย้อนหลังต่อ stream ที่ใช้ในกราฟ/แผนที่
+  batch_size: 50            # เขียน CSV ครั้งละไม่เกินกี่แถว
+  flush_interval_s: 0.25   # รอรวมแถวได้นานสูงสุดเท่าไร ก่อนเขียน
+  # enabled = รับข้อมูลมาใช้, save = เขียน CSV; frequency_hz ต้องเป็น 1/5/10/20/50
+  # position กับ attitude จำเป็นสำหรับ move_to แม้ตั้ง save: false
+  streams:
+    position: {enabled: true, save: true, frequency_hz: 10}
+    attitude: {enabled: true, save: true, frequency_hz: 10}
+    imu:      {enabled: false, save: false, frequency_hz: 10}
+    esc:      {enabled: false, save: false, frequency_hz: 10}
+    status:   {enabled: true, save: true, frequency_hz: 5}
+    tof:      {enabled: true, save: true, frequency_hz: 5}
+    adapter:  {enabled: false, save: false, frequency_hz: 10}
+    battery:  {enabled: true, save: true, frequency_hz: 1}
+    gimbal:   {enabled: true, save: true, frequency_hz: 5}
+
+dashboard:
+  enabled: false           # true = เปิดหน้าเว็บและกล้องพร้อมกับโปรแกรม
+  host: 127.0.0.1          # เปิดดูจากคอมที่รันโปรแกรมเท่านั้น
+  port: 8000               # URL: http://127.0.0.1:8000
+  resolution: 360p         # 360p / 540p / 720p; เริ่มต่ำเพื่อประหยัด Wi-Fi
+  max_fps: 5               # จำนวนภาพ JPEG สูงสุดที่ส่งให้หน้าเว็บต่อวินาที
+  jpeg_quality: 70         # 1-100; ค่าสูงใช้แบนด์วิดท์และ CPU มากขึ้น
+
+review:
+  host: 127.0.0.1          # หน้าอ่านข้อมูลย้อนหลัง เปิดเฉพาะคอมเครื่องนี้
+  port: 8001               # URL: http://127.0.0.1:8001
+  max_points_per_stream: 10000 # จำกัดจุดที่ส่งให้เบราว์เซอร์ต่อ CSV; ไฟล์จริงยังครบ
+  close_tof_mm: 200        # แจ้งเหตุการณ์เมื่อ ToF ช่อง 1 ต่ำกว่าระยะนี้ (mm)
+
+mission:
+  enabled: false          # เริ่มจาก false เพื่อไม่ให้รถวิ่งทันทีเมื่อทดสอบการเชื่อมต่อ
+  waypoints:              # พิกัดสัมบูรณ์จากตำแหน่งเริ่มต้น; yaw: null = รักษาทิศเดิม
+    - {x: 0.5, y: 0.0, yaw: null}  # ไปข้างหน้า
+    - {x: 0.5, y: 0.5, yaw: null}  # สไลด์ขวาและรักษาทิศเดิม
+
+exploration:
+  enabled: false         # true = ใช้ SLAM + DFS แทน mission waypoints
+  position_coordinate_system: 1 # ผูกแผนที่กับพิกัดตั้งแต่เปิดหุ่นยนต์ เพื่อให้โหลดแผนที่เดิมได้ในรอบเปิดเครื่องเดียวกัน
+  step_m: 0.40            # ระยะห่างระหว่างจุดสำรวจบนกริด DFS
+  max_speed_m_s: 0.20     # จำกัดความเร็วขณะสำรวจแยกจาก mission waypoint
+  robot_radius_m: 0.20    # รัศมีกรอบหุ่นยนต์สำหรับตรวจทางผ่าน
+  clearance_margin_m: 0.06
+  max_nodes: 120           # จำกัดจำนวนช่องที่ DFS จะเข้าเยี่ยมต่อรอบ
+  update_hz: 5
+  sample_timeout_s: 1.0
+  sample_skew_s: 0.25
+  sensor:
+    tof_channel: 1         # ช่อง ToF ใน SDK เริ่มนับจาก 1
+    offset_from_yaw_axis_m: 0.075 # ระยะจากแกนหมุน yaw ถึงหัว ToF ตามข้อมูลการติดตั้ง
+    offset_yaw_deg: 0.0    # ทิศของ offset เทียบแนวเลนส์; 0 = อยู่ตามแนวเลนส์
+    pivot_x_m: 0.0         # ตำแหน่งแกน yaw เทียบจุดกึ่งกลางหุ่น; ปรับเมื่อวัดได้
+    pivot_y_m: 0.0
+    yaw_offset_deg: 0.0    # มุมคลาดระหว่างแนวเลนส์กับแนวหน้า gimbal
+  gimbal:
+    pitch_deg: 0.0
+    yaw_speed_deg_s: 60
+    angle_tolerance_deg: 3
+    move_timeout_s: 3.0
+    scan_timeout_s: 2.0
+  map:
+    resolution_m: 0.05
+    width_m: 8.0
+    height_m: 8.0
+    min_range_m: 0.10
+    max_range_m: 3.0      # ปลายลำแสงไกลกว่านี้ถือว่าไม่มีสิ่งกีดขวาง
+    robot_clearance_m: 0.20 # ไม่ทำเครื่องหมายพื้นที่ใต้ตัวหุ่นยนต์เป็นทางว่าง
+    free_update: -0.40
+    occupied_update: 0.85
+    save_path: data/maps/latest.json
+    load_path: null       # ใส่ path ของไฟล์ JSON ที่เคยส่งออก เมื่อต้องการอ่านกลับ
+  scan_match:
+    translation_m: 0.10
+    angle_deg: 4.0
+    angle_step_deg: 2.0
+    minimum_score: 0.15
+    minimum_improvement: 0.08

@@ -1,0 +1,606 @@
+"""Odometry-backed 2D occupancy-grid SLAM from RoboMaster EP ToF scans."""
+
+import json
+import math
+import threading
+import time
+from pathlib import Path
+
+
+MAP_FORMAT = "robomaster-occupancy-grid"
+MAP_VERSION = 1
+
+
+def _wrap_degrees(angle):
+    return (angle + 180.0) % 360.0 - 180.0
+
+
+def _line_cells(x0, y0, x1, y1):
+    """Yield integer grid cells on an inclusive Bresenham line."""
+    dx, dy = abs(x1 - x0), abs(y1 - y0)
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    error = dx - dy
+    while True:
+        yield x0, y0
+        if x0 == x1 and y0 == y1:
+            break
+        doubled = 2 * error
+        if doubled > -dy:
+            error -= dy
+            x0 += sx
+        if doubled < dx:
+            error += dx
+            y0 += sy
+
+
+class OccupancyGridSLAM:
+    """Build and locally scan-match a 2D occupancy grid.
+
+    The RoboMaster SDK supplies the pose prior. A single ToF mounted on the
+    gimbal supplies one ray at the current gimbal yaw. Its configured offset is
+    measured from the gimbal yaw axis along the optical axis. A single ray is
+    integrated into the map but is not enough for scan matching.
+    """
+
+    def __init__(self, settings):
+        self.settings = settings
+        map_settings = settings["map"]
+        self.resolution = float(map_settings["resolution_m"])
+        self.width = int(round(map_settings["width_m"] / self.resolution))
+        self.height = int(round(map_settings["height_m"] / self.resolution))
+        if self.width < 2 or self.height < 2 or self.width * self.height > 500_000:
+            raise ValueError("SLAM grid must contain between 4 and 500000 cells")
+        self.log_odds = [0.0] * (self.width * self.height)
+        self.origin_x = -self.width * self.resolution / 2.0
+        self.origin_y = -self.height * self.resolution / 2.0
+        self.anchor_pose = None
+        self.pose = None
+        self.trajectory = []
+        self.latest_ranges_mm = None
+        self.latest_range_mm = None
+        self.latest_gimbal_yaw_deg = None
+        self.latest_scan_timestamp = None
+        self.scan_count = 0
+        self.has_map = False
+        self.localization_score = None
+        self.exploration_state = {"status": "disabled", "visited": [], "stack": []}
+        self.last_error = None
+        self.lock = threading.RLock()
+
+    def _inside(self, ix, iy):
+        return 0 <= ix < self.width and 0 <= iy < self.height
+
+    def world_to_cell(self, x, y):
+        if self.origin_x is None:
+            return None
+        return (math.floor((x - self.origin_x) / self.resolution),
+                math.floor((y - self.origin_y) / self.resolution))
+
+    def contains_world(self, x, y):
+        cell = self.world_to_cell(x, y)
+        return cell is not None and self._inside(*cell)
+
+    def cell_to_world(self, ix, iy, center=True):
+        shift = 0.5 if center else 0.0
+        return (self.origin_x + (ix + shift) * self.resolution,
+                self.origin_y + (iy + shift) * self.resolution)
+
+    def _index(self, ix, iy):
+        return iy * self.width + ix
+
+    def _cell_odds(self, ix, iy):
+        if not self._inside(ix, iy):
+            return 0.0
+        return self.log_odds[self._index(ix, iy)]
+
+    def _add_odds(self, ix, iy, delta):
+        if self._inside(ix, iy):
+            index = self._index(ix, iy)
+            self.log_odds[index] = max(-4.0, min(4.0, self.log_odds[index] + delta))
+
+    def _range_value(self, reading_mm):
+        """Accept one range or select the configured one-based SDK channel."""
+        if isinstance(reading_mm, (list, tuple)):
+            channel = int(self.settings["sensor"]["tof_channel"]) - 1
+            if len(reading_mm) <= channel:
+                return None
+            reading_mm = reading_mm[channel]
+        try:
+            measured = float(reading_mm) / 1000.0
+        except (TypeError, ValueError):
+            return None
+        min_range = float(self.settings["map"]["min_range_m"])
+        if not math.isfinite(measured) or measured < min_range or measured > 10.0:
+            return None
+        return measured
+
+    def _beam_geometry(self, pose, reading_mm, gimbal_yaw_deg=0.0):
+        x, y, yaw = pose
+        yaw_rad = math.radians(yaw)
+        cos_yaw, sin_yaw = math.cos(yaw_rad), math.sin(yaw_rad)
+        max_range = float(self.settings["map"]["max_range_m"])
+        sensor = self.settings["sensor"]
+        measured = self._range_value(reading_mm)
+        try:
+            gimbal_yaw_deg = float(gimbal_yaw_deg)
+        except (TypeError, ValueError):
+            return []
+        if measured is None or not math.isfinite(gimbal_yaw_deg):
+            return []
+        distance = min(measured, max_range)
+        hit = measured < max_range
+        beam_yaw = yaw + gimbal_yaw_deg + float(sensor["yaw_offset_deg"])
+        beam_rad = math.radians(beam_yaw)
+        offset_rad = beam_rad + math.radians(float(sensor["offset_yaw_deg"]))
+        pivot_x, pivot_y = float(sensor["pivot_x_m"]), float(sensor["pivot_y_m"])
+        offset = float(sensor["offset_from_yaw_axis_m"])
+        sx = (x + pivot_x * cos_yaw - pivot_y * sin_yaw +
+              offset * math.cos(offset_rad))
+        sy = (y + pivot_x * sin_yaw + pivot_y * cos_yaw +
+              offset * math.sin(offset_rad))
+        ex = sx + distance * math.cos(beam_rad)
+        ey = sy + distance * math.sin(beam_rad)
+        return [(sx, sy, ex, ey, hit)]
+
+    def scan_is_valid(self, reading_mm, gimbal_yaw_deg=0.0):
+        return len(self._beam_geometry((0.0, 0.0, 0.0), reading_mm,
+                                       gimbal_yaw_deg)) == 1
+
+    def _endpoint_score(self, beams):
+        """Score hit endpoints against nearby occupied cells in the old map."""
+        scores = []
+        radius = max(1, int(math.ceil(0.10 / self.resolution)))
+        for sx, sy, ex, ey, hit in beams:
+            if not hit:
+                continue
+            cell = self.world_to_cell(ex, ey)
+            if cell is None:
+                continue
+            ix, iy = cell
+            best = 0.0
+            for dy in range(-radius, radius + 1):
+                for dx in range(-radius, radius + 1):
+                    if math.hypot(dx, dy) > radius + 0.25:
+                        continue
+                    best = max(best, self._cell_odds(ix + dx, iy + dy))
+            scores.append(best / 4.0)
+        return sum(scores) / len(scores) if scores else 0.0
+
+    def _scan_match(self, prior, reading_mm, gimbal_yaw_deg):
+        beams = self._beam_geometry(prior, reading_mm, gimbal_yaw_deg)
+        hit_count = sum(1 for beam in beams if beam[4])
+        if hit_count < 2 or self.scan_count < 3:
+            self.localization_score = None
+            return prior
+
+        baseline = self._endpoint_score(beams)
+        best_pose, best_score = prior, baseline
+        radius = float(self.settings["scan_match"]["translation_m"])
+        translation_step = max(self.resolution, radius / 2.0)
+        angle_radius = float(self.settings["scan_match"]["angle_deg"])
+        angle_step = float(self.settings["scan_match"]["angle_step_deg"])
+        count = int(math.floor(radius / translation_step))
+        angle_count = int(math.floor(angle_radius / angle_step))
+        for dx_step in range(-count, count + 1):
+            dx = dx_step * translation_step
+            for dy_step in range(-count, count + 1):
+                dy = dy_step * translation_step
+                for angle_step_index in range(-angle_count, angle_count + 1):
+                    d_yaw = angle_step_index * angle_step
+                    candidate = (prior[0] + dx, prior[1] + dy,
+                                 prior[2] + d_yaw)
+                    candidate_beams = self._beam_geometry(
+                        candidate, reading_mm, gimbal_yaw_deg
+                    )
+                    score = self._endpoint_score(candidate_beams)
+                    if score > best_score:
+                        best_pose, best_score = candidate, score
+        self.localization_score = round(best_score, 3)
+        minimum_score = float(self.settings["scan_match"]["minimum_score"])
+        improvement = float(self.settings["scan_match"]["minimum_improvement"])
+        if best_score >= minimum_score and best_score >= baseline + improvement:
+            return best_pose
+        return prior
+
+    def _integrate_beam(self, beam):
+        sx, sy, ex, ey, hit = beam
+        dx, dy = ex - sx, ey - sy
+        length = math.hypot(dx, dy)
+        skip = min(float(self.settings["map"]["robot_clearance_m"]), length)
+        if length > 0:
+            sx += dx * skip / length
+            sy += dy * skip / length
+        start = self.world_to_cell(sx, sy)
+        end = self.world_to_cell(ex, ey)
+        if start is None or end is None:
+            return
+        cells = list(_line_cells(*start, *end))
+        if not cells:
+            return
+        free_delta = float(self.settings["map"]["free_update"])
+        occupied_delta = float(self.settings["map"]["occupied_update"])
+        for ix, iy in cells[:-1] if hit else cells:
+            self._add_odds(ix, iy, free_delta)
+        if hit:
+            self._add_odds(*cells[-1], occupied_delta)
+
+    def update(self, odom_pose, reading_mm, timestamp=None, gimbal_yaw_deg=0.0):
+        """Integrate one pose, selected ToF distance and relative gimbal yaw."""
+        if len(odom_pose) < 3:
+            raise ValueError("SLAM needs (x, y, yaw)")
+        odom_pose = tuple(float(value) for value in odom_pose[:3])
+        if not all(math.isfinite(value) for value in odom_pose):
+            raise ValueError("pose contains a non-finite value")
+        timestamp = time.time() if timestamp is None else float(timestamp)
+        if not math.isfinite(timestamp):
+            raise ValueError("scan timestamp must be finite")
+        try:
+            gimbal_yaw_deg = float(gimbal_yaw_deg)
+        except (TypeError, ValueError) as error:
+            raise ValueError("gimbal yaw must be finite") from error
+        if not math.isfinite(gimbal_yaw_deg) or not self.scan_is_valid(
+                reading_mm, gimbal_yaw_deg):
+            raise ValueError("scan needs a valid ToF distance and gimbal yaw")
+        with self.lock:
+            if self.anchor_pose is None:
+                self.anchor_pose = list(odom_pose)
+            pose = self._scan_match(odom_pose, reading_mm, gimbal_yaw_deg)
+            beams = self._beam_geometry(pose, reading_mm, gimbal_yaw_deg)
+            for beam in beams:
+                self._integrate_beam(beam)
+            self.pose = list(pose)
+            if isinstance(reading_mm, (list, tuple)):
+                self.latest_ranges_mm = []
+                for value in reading_mm:
+                    try:
+                        self.latest_ranges_mm.append(float(value))
+                    except (TypeError, ValueError):
+                        self.latest_ranges_mm.append(None)
+                self.latest_range_mm = float(
+                    reading_mm[int(self.settings["sensor"]["tof_channel"]) - 1]
+                )
+            else:
+                self.latest_range_mm = float(reading_mm)
+                self.latest_ranges_mm = [self.latest_range_mm]
+            self.latest_gimbal_yaw_deg = gimbal_yaw_deg
+            self.latest_scan_timestamp = timestamp
+            self.scan_count += 1
+            self.has_map = True
+            if (not self.trajectory or
+                    math.hypot(pose[0] - self.trajectory[-1][0],
+                               pose[1] - self.trajectory[-1][1]) >= self.resolution * 2 or
+                    abs(_wrap_degrees(pose[2] - self.trajectory[-1][2])) >= 2.0):
+                self.trajectory.append([round(value, 4) for value in pose])
+                if len(self.trajectory) > 6_000:
+                    del self.trajectory[:len(self.trajectory) - 6_000]
+            self.last_error = None
+            return list(self.pose)
+
+    def path_has_obstacle(self, start_xy, end_xy, clearance_m=0.0):
+        """Return true when a mapped occupied cell blocks a line segment."""
+        with self.lock:
+            start = self.world_to_cell(*start_xy)
+            end = self.world_to_cell(*end_xy)
+            if (start is None or end is None or not self._inside(*start) or
+                    not self._inside(*end)):
+                return True
+            cells = _line_cells(*start, *end)
+            radius = int(math.ceil(clearance_m / self.resolution))
+            for ix, iy in cells:
+                for dy in range(-radius, radius + 1):
+                    for dx in range(-radius, radius + 1):
+                        if math.hypot(dx, dy) > radius + 0.25:
+                            continue
+                        if not self._inside(ix + dx, iy + dy):
+                            return True
+                        if self._cell_odds(ix + dx, iy + dy) >= 0.8:
+                            return True
+            return False
+
+    def set_exploration_state(self, state):
+        with self.lock:
+            self.exploration_state = json.loads(json.dumps(state))
+
+    def _occupancy_data(self):
+        data = []
+        known, free, occupied = 0, 0, 0
+        for odds in self.log_odds:
+            if odds >= 0.62:
+                data.append(100)
+                occupied += 1
+                known += 1
+            elif odds <= -0.62:
+                data.append(0)
+                free += 1
+                known += 1
+            else:
+                data.append(-1)
+        return data, {"known_cells": known, "free_cells": free,
+                      "occupied_cells": occupied,
+                      "unknown_cells": self.width * self.height - known}
+
+    def to_dict(self):
+        """Return a JSON-serializable map document; rows are y-major from bottom."""
+        with self.lock:
+            data, counts = self._occupancy_data()
+            return {
+                "format": MAP_FORMAT,
+                "version": MAP_VERSION,
+                "frame": "map",
+                "axis_convention": "SDK position coordinates in metres; grid rows increase with +y",
+                "resolution_m": self.resolution,
+                "width": self.width,
+                "height": self.height,
+                "origin": [self.origin_x, self.origin_y, 0.0],
+                "anchor_pose": list(self.anchor_pose) if self.anchor_pose is not None else None,
+                "pose": list(self.pose) if self.pose is not None else None,
+                "trajectory": [list(point) for point in self.trajectory],
+                "data": data,
+                "counts": counts,
+                "scan_count": self.scan_count,
+                "has_map": self.has_map,
+                "sensor_model": {
+                    "type": "single_gimbal_tof",
+                    "tof_channel": int(self.settings["sensor"]["tof_channel"]),
+                    "offset_from_yaw_axis_m": float(
+                        self.settings["sensor"]["offset_from_yaw_axis_m"]
+                    ),
+                    "pivot_x_m": float(self.settings["sensor"]["pivot_x_m"]),
+                    "pivot_y_m": float(self.settings["sensor"]["pivot_y_m"]),
+                    "yaw_offset_deg": float(self.settings["sensor"]["yaw_offset_deg"]),
+                    "offset_yaw_deg": float(self.settings["sensor"]["offset_yaw_deg"]),
+                    "latest_gimbal_yaw_deg": self.latest_gimbal_yaw_deg,
+                },
+                "localization_score": self.localization_score,
+                "latest_scan_timestamp": self.latest_scan_timestamp,
+                "exploration": json.loads(json.dumps(self.exploration_state)),
+            }
+
+    def load_dict(self, document):
+        """Replace map state from a JSON export generated by this module."""
+        if not isinstance(document, dict) or document.get("format") != MAP_FORMAT:
+            raise ValueError("unsupported map file format")
+        if type(document.get("version")) is not int or document["version"] != MAP_VERSION:
+            raise ValueError("unsupported map file version")
+        width, height = document.get("width"), document.get("height")
+        resolution = document.get("resolution_m")
+        origin = document.get("origin")
+        data = document.get("data")
+        if (type(width) is not int or type(height) is not int or width < 2 or height < 2 or
+                width * height > 500_000 or not isinstance(resolution, (int, float)) or
+                type(resolution) not in (int, float) or not math.isfinite(resolution) or resolution <= 0 or
+                not isinstance(origin, list) or len(origin) < 2 or
+                not all(type(v) in (int, float) and math.isfinite(v) for v in origin[:2]) or
+                not isinstance(data, list) or len(data) != width * height):
+            raise ValueError("map file has invalid grid metadata")
+        if any(type(value) is not int or (value != -1 and not 0 <= value <= 100)
+               for value in data):
+            raise ValueError("map file occupancy values must be -1 or integers from 0 to 100")
+        def checked_pose(value, name):
+            if value is None:
+                return None
+            if (not isinstance(value, list) or len(value) != 3 or
+                    any(type(item) not in (int, float) or not math.isfinite(item)
+                        for item in value)):
+                raise ValueError(f"map file {name} must be null or a finite x/y/yaw list")
+            return [float(item) for item in value]
+
+        anchor_pose = checked_pose(document.get("anchor_pose"), "anchor_pose")
+        pose = checked_pose(document.get("pose"), "pose")
+        trajectory = document.get("trajectory", [])
+        if (not isinstance(trajectory, list) or len(trajectory) > 6000 or
+                any(checked_pose(point, "trajectory point") is None for point in trajectory)):
+            raise ValueError("map file trajectory must contain at most 6000 finite poses")
+        exploration_state = document.get("exploration", {
+            "status": "loaded", "visited": [], "stack": []})
+        if not isinstance(exploration_state, dict):
+            raise ValueError("map file exploration state must be an object")
+        try:
+            json.dumps(exploration_state, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise ValueError("map file exploration state must contain only finite JSON values") from error
+        scan_count = document.get("scan_count", 0)
+        if type(scan_count) is not int or scan_count < 0:
+            raise ValueError("map file scan_count must be a nonnegative integer")
+        localization_score = document.get("localization_score")
+        if (localization_score is not None and
+                (type(localization_score) not in (int, float) or not math.isfinite(localization_score))):
+            raise ValueError("map file localization_score must be finite or null")
+        scan_timestamp = document.get("latest_scan_timestamp")
+        if (scan_timestamp is not None and
+                (type(scan_timestamp) not in (int, float) or not math.isfinite(scan_timestamp))):
+            raise ValueError("map file latest_scan_timestamp must be finite or null")
+        sensor_model = document.get("sensor_model", {})
+        if not isinstance(sensor_model, dict):
+            raise ValueError("map file sensor_model must be an object")
+        latest_gimbal_yaw = sensor_model.get("latest_gimbal_yaw_deg")
+        if (latest_gimbal_yaw is not None and
+                (type(latest_gimbal_yaw) not in (int, float) or
+                 not math.isfinite(latest_gimbal_yaw))):
+            raise ValueError("map file latest gimbal yaw must be finite or null")
+        with self.lock:
+            self.width, self.height = width, height
+            self.resolution = float(resolution)
+            self.origin_x, self.origin_y = float(origin[0]), float(origin[1])
+            self.log_odds = [0.0] * len(data)
+            for index, value in enumerate(data):
+                if value == -1:
+                    continue
+                probability = max(0.05, min(0.95, value / 100.0))
+                self.log_odds[index] = math.log(probability / (1.0 - probability))
+            self.anchor_pose = anchor_pose
+            self.pose = pose
+            self.trajectory = [[float(value) for value in point] for point in trajectory]
+            self.scan_count = scan_count
+            self.has_map = True
+            self.localization_score = localization_score
+            self.latest_scan_timestamp = scan_timestamp
+            self.latest_range_mm = None
+            self.latest_ranges_mm = None
+            self.latest_gimbal_yaw_deg = latest_gimbal_yaw
+            self.exploration_state = document.get("exploration", {
+                "status": "loaded", "visited": [], "stack": []})
+
+    def load_file(self, path):
+        with Path(path).open(encoding="utf-8") as file:
+            document = json.load(file)
+        self.load_dict(document)
+
+    def save_file(self, path):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        with temporary.open("w", encoding="utf-8") as file:
+            json.dump(self.to_dict(), file, ensure_ascii=False, separators=(",", ":"))
+        temporary.replace(path)
+
+    def ros_map_archive(self):
+        """Build a ZIP containing ROS map_server YAML/PGM and the source JSON."""
+        import io
+        import zipfile
+
+        document = self.to_dict()
+        data = document["data"]
+        width, height = document["width"], document["height"]
+        pixels = bytearray()
+        # PGM is top-to-bottom; OccupancyGrid JSON is bottom-to-top.
+        for row in range(height - 1, -1, -1):
+            for value in data[row * width:(row + 1) * width]:
+                pixels.append(205 if value == -1 else 0 if value >= 65 else 254 if value <= 19 else 128)
+        pgm = f"P5\n{width} {height}\n255\n".encode("ascii") + bytes(pixels)
+        yaml_text = (
+            "image: map.pgm\n"
+            f"resolution: {document['resolution_m']}\n"
+            f"origin: [{document['origin'][0]}, {document['origin'][1]}, 0.0]\n"
+            "negate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.196\nmode: trinary\n"
+        )
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("map.yaml", yaml_text)
+            archive.writestr("map.pgm", pgm)
+            archive.writestr("slam.json", json.dumps(document, ensure_ascii=False))
+        return buffer.getvalue()
+
+
+class SlamWorker:
+    """Sample synchronized logger telemetry and update the shared SLAM map."""
+
+    def __init__(self, logger, slam_map, settings):
+        self.logger = logger
+        self.map = slam_map
+        self.settings = settings
+        self.stop_event = threading.Event()
+        self.thread = None
+        self.is_running = False
+        self.ready = threading.Event()
+        self.last_tof_timestamp = None
+        self.error = None
+        self.lock = threading.Lock()
+        self.abort_event = threading.Event()
+        self.started_at = None
+        self.last_good_scan_monotonic = None
+
+    def start(self):
+        if self.is_running:
+            raise RuntimeError("SLAM worker is already running")
+        self.stop_event.clear()
+        self.abort_event.clear()
+        self.ready.clear()
+        self.started_at = time.monotonic()
+        self.last_good_scan_monotonic = None
+        self.last_tof_timestamp = None
+        self.error = None
+        self.is_running = True
+        self.thread = threading.Thread(target=self._run, name="slam-map-updater", daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        period = 1.0 / self.settings["update_hz"]
+        max_age = self.settings["sample_timeout_s"]
+        while not self.stop_event.is_set():
+            started = time.monotonic()
+            try:
+                position = self.logger.get_sample("position", max_age_s=max_age)
+                attitude = self.logger.get_sample("attitude", max_age_s=max_age)
+                tof = self.logger.get_sample("tof", max_age_s=max_age)
+                gimbal = self.logger.get_sample("gimbal", max_age_s=max_age)
+                status = self.logger.get_sample("status", max_age_s=max_age)
+                if (position is not None and attitude is not None and tof is not None and
+                        gimbal is not None and status is not None):
+                    values, timestamp = tof
+                    gimbal_values, gimbal_timestamp = gimbal
+                    status_values = status[0]
+                    if len(status_values) < 10:
+                        raise ValueError("exploration needs the complete RoboMaster chassis status sample")
+                    for index in (4, 5, 6, 7, 8, 9):
+                        if index < len(status_values) and status_values[index] not in (0, False, None):
+                            raise RuntimeError(f"robot safety status flag {index} is active")
+                    channel = int(self.settings["sensor"]["tof_channel"]) - 1
+                    if len(values) <= channel:
+                        raise ValueError("ToF callback did not include the configured channel")
+                    if len(gimbal_values) < 2:
+                        raise ValueError("gimbal callback needs pitch and relative yaw angles")
+                    reading_mm = values[channel]
+                    gimbal_yaw_deg = gimbal_values[1]
+                    timestamps = (position[1], attitude[1], timestamp,
+                                  gimbal_timestamp, status[1])
+                    synchronized = max(timestamps) - min(timestamps) <= self.settings["sample_skew_s"]
+                    if synchronized and timestamp != self.last_tof_timestamp:
+                        if not self.map.scan_is_valid(reading_mm, gimbal_yaw_deg):
+                            raise ValueError("exploration needs a valid range on the configured ToF channel")
+                        pose = (position[0][0], position[0][1], attitude[0][0])
+                        self.map.update(pose, reading_mm, timestamp=timestamp,
+                                        gimbal_yaw_deg=gimbal_yaw_deg)
+                        self.last_tof_timestamp = timestamp
+                        self.last_good_scan_monotonic = time.monotonic()
+                        self.ready.set()
+                        with self.lock:
+                            self.error = None
+                    elif self.ready.is_set() and self._scan_stale():
+                        self._fail("pose, gimbal, status and ToF timestamps did not stay synchronized")
+                elif self.ready.is_set() and self._scan_stale():
+                    self._fail("pose, gimbal, status or ToF telemetry became stale during exploration")
+            except Exception as error:
+                self._fail(str(error))
+            remaining = period - (time.monotonic() - started)
+            self.stop_event.wait(max(0.01, remaining))
+        self.is_running = False
+
+    def _scan_stale(self):
+        reference = self.last_good_scan_monotonic or self.started_at or time.monotonic()
+        return time.monotonic() - reference > self.settings["sample_timeout_s"]
+
+    def _fail(self, message):
+        with self.lock:
+            self.error = message
+        with self.map.lock:
+            self.map.last_error = message
+        self.abort_event.set()
+        self.stop_event.set()
+
+    def wait_ready(self, timeout_s=5.0):
+        deadline = time.monotonic() + timeout_s
+        while not self.ready.is_set():
+            with self.lock:
+                error = self.error
+            if error:
+                raise RuntimeError(error)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("SLAM did not receive synchronized pose, gimbal, status and ToF data")
+            self.ready.wait(min(0.1, remaining))
+
+    def stop(self, save_path=None):
+        self.stop_event.set()
+        if self.thread is not None:
+            self.thread.join(timeout=3)
+            self.thread = None
+        self.is_running = False
+        if save_path:
+            self.map.save_file(save_path)
+
+    def status(self):
+        with self.lock:
+            error = self.error
+        return {"running": self.is_running, "ready": self.ready.is_set(), "error": error}

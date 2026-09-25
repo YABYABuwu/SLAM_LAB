@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoboMaster Dashboard</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #0a121c; color: #eef5f7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 22px; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 0 0 18px; }
+    h1, h2, p { margin: 0; }
+    h1 { font-size: clamp(1.25rem, 2vw, 1.8rem); letter-spacing: .02em; }
+    h2 { font-size: 1rem; font-weight: 650; }
+    .muted { color: #91a5b6; font-size: .83rem; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-mark { width: 12px; height: 32px; border-radius: 4px; background: #6de4c4; box-shadow: 0 0 18px #36dbb79c; }
+    .live { border: 1px solid #315f55; background: #14392f; color: #94f4d4; border-radius: 999px; padding: 8px 12px; white-space: nowrap; font-size: .82rem; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(390px, .88fr); gap: 16px; align-items: start; max-width: 1800px; margin: auto; }
+    .left { display: grid; gap: 16px; min-width: 0; }
+    .card { background: #12202c; border: 1px solid #284052; border-radius: 16px; box-shadow: 0 10px 28px #0002; overflow: hidden; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 17px; border-bottom: 1px solid #263a49; }
+    .card-head .muted { text-align: right; }
+    .camera-wrap { position: relative; background: #070d12; aspect-ratio: 16 / 9; min-height: 240px; }
+    .camera-wrap img { display: block; width: 100%; height: 100%; object-fit: contain; }
+    .camera-wrap .top-strip { position: absolute; top: 14px; left: 14px; right: 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; pointer-events: none; }
+    .tag { background: #08141dcc; border: 1px solid #77ecd469; border-radius: 9px; padding: 7px 10px; backdrop-filter: blur(5px); }
+    .tag strong { color: #98f5dc; font-variant-numeric: tabular-nums; }
+    .crosshair { position: absolute; top: 50%; left: 50%; width: 62px; height: 62px; transform: translate(-50%, -50%); pointer-events: none; filter: drop-shadow(0 0 3px #051817); }
+    .crosshair::before, .crosshair::after { content: ""; position: absolute; background: #8ef4d3; }
+    .crosshair::before { width: 1px; height: 62px; left: 30px; }
+    .crosshair::after { height: 1px; width: 62px; top: 30px; }
+    .crosshair span { position: absolute; left: 25px; top: 25px; width: 11px; height: 11px; border: 1px solid #8ef4d3; border-radius: 50%; background: #061a1a88; }
+    .camera-note { padding: 10px 16px; min-height: 38px; }
+    .map-wrap { position: relative; padding: 14px; }
+    #map { display: block; width: 100%; height: 330px; border-radius: 9px; background: #0a1721; }
+    .map-info { position: absolute; top: 25px; left: 26px; display: grid; gap: 5px; font-size: .8rem; color: #d4e4ec; background: #0a1721df; border: 1px solid #315060; border-radius: 9px; padding: 9px 11px; }
+    .map-info strong { color: #8af0cf; font-size: 1rem; }
+    .map-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+    .map-actions button { background: #172b3a; color: #e8f2f5; border: 1px solid #365469; border-radius: 7px; padding: 5px 8px; font: inherit; font-size: .72rem; cursor: pointer; }
+    .map-actions button:hover { border-color: #78c9e5; }
+    .map-legend { position: absolute; right: 26px; bottom: 25px; display: flex; gap: 12px; background: #0a1721df; padding: 7px 9px; border-radius: 8px; font-size: .72rem; }
+    .key::before { content: ""; display: inline-block; width: 12px; height: 3px; margin-right: 5px; vertical-align: middle; background: var(--key); }
+    .right { min-width: 0; }
+    .graphs { display: grid; gap: 12px; padding: 14px; max-height: calc(100vh - 135px); overflow-y: auto; }
+    .graph { background: #0c1b27; border: 1px solid #294255; border-radius: 11px; padding: 12px; min-width: 0; }
+    .graph-title { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+    .graph-title strong { text-transform: uppercase; letter-spacing: .07em; font-size: .82rem; }
+    .graph canvas { display: block; width: 100%; height: 140px; cursor: crosshair; }
+    .series-legend { display: flex; flex-wrap: wrap; gap: 5px 12px; margin: 4px 0 9px; color: #a9bfcb; font-size: .69rem; }
+    .series-legend span::before { content: ""; display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin-right: 4px; background: var(--line); }
+    .graph .readout { min-height: 42px; color: #b8cfda; font-size: .76rem; line-height: 1.5; overflow-wrap: anywhere; }
+    .graph .readout b { color: #eff7f8; }
+    #empty { padding: 24px; text-align: center; }
+    @media (max-width: 950px) { .layout { grid-template-columns: 1fr; } .graphs { max-height: none; } }
+    @media (max-width: 600px) { body { padding: 12px; } header { align-items: flex-start; } .camera-wrap { min-height: 190px; } #map { height: 270px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand"><div class="brand-mark"></div><div><h1>RoboMaster Dashboard</h1><p class="muted" id="mission">กำลังรอข้อมูล…</p></div></div>
+    <div class="live" id="connection">● กำลังเชื่อมต่อ</div>
+  </header>
+  <main class="layout">
+    <div class="left">
+      <section class="card">
+        <div class="card-head"><h2>ภาพจากกล้อง</h2><span class="muted">ภาพล่าสุด · crosshair กลางภาพ</span></div>
+        <div class="camera-wrap">
+          <img src="/video" alt="ภาพสดจากกล้อง RoboMaster">
+          <div class="top-strip"><div class="tag"><span id="tof-label">ToF #1</span>&nbsp; <strong id="tof">— mm</strong></div><div class="tag">Gimbal&nbsp; <strong id="gimbal-angle">—</strong></div></div>
+          <div class="crosshair"><span></span></div>
+        </div>
+        <p class="camera-note muted" id="camera-note">รอภาพจากกล้อง…</p>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>แผนที่ SLAM / DFS</h2><div class="map-actions"><button id="export-json" type="button">ส่งออก JSON</button><button id="export-ros" type="button">ส่งออก ROS</button><button id="load-map" type="button">เปิด JSON</button><input id="map-file" type="file" accept="application/json,.json" hidden></div></div>
+        <div class="map-wrap">
+          <canvas id="map" aria-label="เส้นทาง ตำแหน่ง และทิศหุ่นยนต์"></canvas>
+          <div class="map-info"><div>DFS&nbsp; <strong id="dfs-status">ปิด</strong></div><div id="map-counts">รอข้อมูลแผนที่</div><div id="pose">X — · Y — · Yaw —</div><div>ความเร็ว&nbsp; <strong id="speed">— m/s</strong></div><div>Gimbal&nbsp; <span id="gimbal-map">—</span></div><div id="tof-model">ToF: —</div><div id="map-message"></div></div>
+          <div class="map-legend"><span class="key" style="--key:#122c39">พื้นที่ว่าง</span><span class="key" style="--key:#ffb868">สิ่งกีดขวาง</span><span class="key" style="--key:#69d9ff">เส้นทาง</span></div>
+        </div>
+      </section>
+    </div>
+    <section class="card right">
+      <div class="card-head"><h2>กราฟเซนเซอร์</h2><span class="muted" id="graph-summary">ชี้กราฟเพื่ออ่านค่า · CSV ข้าม 0 แถว</span></div>
+      <div class="graphs" id="graphs"><p class="muted" id="empty">รอข้อมูลจากเซนเซอร์ที่เปิดอยู่…</p></div>
+    </section>
+  </main>
+  <script>
+    const colors = ["#6ed9ff", "#ffb967", "#8cf1d2", "#c5a5ff", "#f28bb5", "#f6d67d", "#8daeff", "#b6dc88"];
+    const history = {};
+    const columns = {};
+    const chartCards = {};
+    let cursor = 0;
+    let latest = {};
+    let slamMap = null;
+    let busy = false;
+
+    function number(value, digits = 2) {
+      return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "—";
+    }
+
+    function fields(name, values) {
+      const labels = columns[name] || [];
+      const result = [];
+      if (!Array.isArray(values)) return result;
+      values.forEach((value, index) => {
+        const label = labels[index] || `value_${index + 1}`;
+        if (Array.isArray(value)) {
+          value.forEach((part, subindex) => {
+            if (part !== null) result.push([`${label}_${subindex + 1}`, Number(part)]);
+          });
+        } else if (value !== null) {
+          result.push([label, Number(value)]);
+        }
+      });
+      return result.filter(item => Number.isFinite(item[1]));
+    }
+
+    function canvasContext(canvas) {
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.round(width * ratio));
+      canvas.height = Math.max(1, Math.round(height * ratio));
+      const context = canvas.getContext("2d");
+      context.scale(ratio, ratio);
+      return {context, width, height};
+    }
+
+    function drawMap() {
+      const canvas = document.getElementById("map");
+      const {context: ctx, width: w, height: h} = canvasContext(canvas);
+      ctx.clearRect(0, 0, w, h);
+      const sensor = slamMap?.sensor_model;
+      if (sensor?.type === "single_gimbal_tof") {
+        document.getElementById("tof-label").textContent = `ToF #${sensor.tof_channel}`;
+        const scanYaw = sensor.latest_gimbal_yaw_deg;
+        document.getElementById("tof-model").textContent = `หัว ToF ห่างแกน yaw ${number(sensor.offset_from_yaw_axis_m * 100, 1)} ซม · scan yaw ${scanYaw == null ? "—" : `${number(scanYaw)}°`}`;
+      } else {
+        document.getElementById("tof-label").textContent = "ToF";
+        document.getElementById("tof-model").textContent = "ToF: ไม่ระบุโมเดลเซนเซอร์";
+      }
+      if (slamMap?.has_map && slamMap.width > 0 && slamMap.height > 0 && slamMap.data?.length === slamMap.width * slamMap.height) {
+        drawSlamMap(ctx, w, h, slamMap);
+        return;
+      }
+      ctx.strokeStyle = "#1c3342";
+      ctx.lineWidth = 1;
+      for (let x = 0; x < w; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+      for (let y = 0; y < h; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+
+      const points = (history.position || []).filter(sample => sample[2] && sample[2].length >= 2);
+      if (!points.length) {
+        ctx.fillStyle = "#91a5b6"; ctx.textAlign = "center";
+        ctx.fillText("รอตำแหน่งจากหุ่นยนต์", w / 2, h / 2);
+        return;
+      }
+      const xs = points.map(p => Number(p[2][0])).concat(0);
+      const ys = points.map(p => Number(p[2][1])).concat(0);
+      const midX = (Math.min(...xs) + Math.max(...xs)) / 2;
+      const midY = (Math.min(...ys) + Math.max(...ys)) / 2;
+      const spanX = Math.max(1.5, Math.max(...xs) - Math.min(...xs));
+      const spanY = Math.max(1.5, Math.max(...ys) - Math.min(...ys));
+      const scale = Math.min((h - 70) / spanX, (w - 70) / spanY);
+      const project = (x, y) => [w / 2 - (y - midY) * scale, h / 2 - (x - midX) * scale];
+
+      const origin = project(0, 0);
+      ctx.fillStyle = "#94aab9"; ctx.beginPath(); ctx.arc(...origin, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillText("start", origin[0] + 8, origin[1] - 7);
+      ctx.beginPath();
+      points.forEach((sample, index) => {
+        const p = project(Number(sample[2][0]), Number(sample[2][1]));
+        if (index === 0) ctx.moveTo(...p); else ctx.lineTo(...p);
+      });
+      ctx.strokeStyle = "#69d9ff"; ctx.lineWidth = 2.5; ctx.stroke();
+
+      const end = points[points.length - 1];
+      const [cx, cy] = project(Number(end[2][0]), Number(end[2][1]));
+      const yaw = Number(latest.attitude?.[0] || 0) * Math.PI / 180;
+      const forward = [-Math.sin(yaw), -Math.cos(yaw)];
+      const side = [-forward[1], forward[0]];
+      ctx.beginPath();
+      ctx.moveTo(cx + forward[0] * 18, cy + forward[1] * 18);
+      ctx.lineTo(cx - forward[0] * 12 + side[0] * 10, cy - forward[1] * 12 + side[1] * 10);
+      ctx.lineTo(cx - forward[0] * 12 - side[0] * 10, cy - forward[1] * 12 - side[1] * 10);
+      ctx.closePath(); ctx.fillStyle = "#ffb868"; ctx.fill();
+      if (latest.gimbal) {
+        const gimbalYaw = yaw + Number(latest.gimbal[1]) * Math.PI / 180;
+        ctx.beginPath(); ctx.moveTo(cx, cy);
+        ctx.lineTo(cx - Math.sin(gimbalYaw) * 34, cy - Math.cos(gimbalYaw) * 34);
+        ctx.strokeStyle = "#8df3d3"; ctx.lineWidth = 3; ctx.stroke();
+      }
+
+      let older = points[0];
+      for (let i = points.length - 2; i >= 0; i--) {
+        older = points[i];
+        if (end[1] - older[1] >= 0.5) break;
+      }
+      const dt = end[1] - older[1];
+      const dx = Number(end[2][0]) - Number(older[2][0]);
+      const dy = Number(end[2][1]) - Number(older[2][1]);
+      document.getElementById("speed").textContent = dt > 0 ? `${number(Math.hypot(dx, dy) / dt)} m/s` : "— m/s";
+      document.getElementById("pose").textContent = `X ${number(end[2][0])} · Y ${number(end[2][1])} · Yaw ${number(latest.attitude?.[0])}°`;
+    }
+
+    function drawSlamMap(ctx, w, h, map) {
+      const resolution = Number(map.resolution_m);
+      const [originX, originY] = map.origin || [0, 0];
+      const worldW = map.width * resolution, worldH = map.height * resolution;
+      const scale = Math.min((w - 28) / worldW, (h - 28) / worldH);
+      const drawnW = worldW * scale, drawnH = worldH * scale;
+      const left = (w - drawnW) / 2, bottom = (h + drawnH) / 2;
+      const cell = Math.max(1, resolution * scale);
+      ctx.fillStyle = "#09141d"; ctx.fillRect(left, bottom - drawnH, drawnW, drawnH);
+      for (let iy = 0; iy < map.height; iy++) {
+        for (let ix = 0; ix < map.width; ix++) {
+          const value = map.data[iy * map.width + ix];
+          if (value < 0) continue;
+          ctx.fillStyle = value >= 65 ? "#ffb868" : value <= 19 ? "#173746" : "#677b83";
+          ctx.fillRect(left + ix * cell, bottom - (iy + 1) * cell, cell + .3, cell + .3);
+        }
+      }
+      ctx.strokeStyle = "#29404f"; ctx.lineWidth = 1;
+      for (let meter = 0; meter <= Math.max(worldW, worldH); meter++) {
+        const x = left + meter * scale, y = bottom - meter * scale;
+        if (meter <= worldW) { ctx.beginPath(); ctx.moveTo(x, bottom - drawnH); ctx.lineTo(x, bottom); ctx.stroke(); }
+        if (meter <= worldH) { ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(left + drawnW, y); ctx.stroke(); }
+      }
+      const project = point => [left + (point[0] - originX) * scale,
+        bottom - (point[1] - originY) * scale];
+      const route = map.trajectory || [];
+      if (route.length) {
+        ctx.beginPath();
+        route.forEach((point, index) => { const p = project(point); if (!index) ctx.moveTo(...p); else ctx.lineTo(...p); });
+        ctx.strokeStyle = "#69d9ff"; ctx.lineWidth = 2.4; ctx.stroke();
+      }
+      for (const point of map.exploration?.visited_points || []) {
+        const [x, y] = project(point);
+        ctx.beginPath(); ctx.arc(x, y, 3.2, 0, Math.PI * 2);
+        ctx.fillStyle = "#8cf1d2"; ctx.fill();
+      }
+      if (map.pose) {
+        const [cx, cy] = project(map.pose), yaw = Number(map.pose[2]) * Math.PI / 180;
+        const forward = [Math.cos(yaw), -Math.sin(yaw)], side = [-forward[1], forward[0]];
+        ctx.beginPath(); ctx.moveTo(cx + forward[0] * 11, cy + forward[1] * 11);
+        ctx.lineTo(cx - forward[0] * 7 + side[0] * 6, cy - forward[1] * 7 + side[1] * 6);
+        ctx.lineTo(cx - forward[0] * 7 - side[0] * 6, cy - forward[1] * 7 - side[1] * 6);
+        ctx.closePath(); ctx.fillStyle = "#f5fbff"; ctx.fill();
+        const gimbal = latest.gimbal;
+        if (gimbal) {
+          const sensor = map.sensor_model || {};
+          const direction = yaw + (Number(gimbal[1]) + Number(sensor.yaw_offset_deg || 0)) * Math.PI / 180;
+          const pivotX = Number(sensor.pivot_x_m || 0), pivotY = Number(sensor.pivot_y_m || 0);
+          const offset = Number(sensor.offset_from_yaw_axis_m || 0);
+          const offsetDirection = direction + Number(sensor.offset_yaw_deg || 0) * Math.PI / 180;
+          const sensorWorldX = map.pose[0] + pivotX * Math.cos(yaw) - pivotY * Math.sin(yaw) + offset * Math.cos(offsetDirection);
+          const sensorWorldY = map.pose[1] + pivotX * Math.sin(yaw) + pivotY * Math.cos(yaw) + offset * Math.sin(offsetDirection);
+          const [sensorX, sensorY] = project(sensorWorldX, sensorWorldY);
+          ctx.beginPath(); ctx.moveTo(sensorX, sensorY);
+          ctx.lineTo(sensorX + Math.cos(direction) * 20, sensorY - Math.sin(direction) * 20);
+          ctx.strokeStyle = "#8df3d3"; ctx.lineWidth = 3; ctx.stroke();
+          document.getElementById("gimbal-map").textContent = `yaw ${number(gimbal[1])}° · pitch ${number(gimbal[0])}°`;
+        } else document.getElementById("gimbal-map").textContent = "—";
+      }
+      const points = history.position || [];
+      const newest = points.at(-1), cutoff = newest ? newest[1] - 0.5 : 0;
+      let older = points.find(point => point[1] >= 0 && point[1] <= cutoff);
+      if (!older && points.length > 1) older = points[0];
+      if (newest && older && newest[1] > older[1]) {
+        const dx = Number(newest[2][0]) - Number(older[2][0]);
+        const dy = Number(newest[2][1]) - Number(older[2][1]);
+        document.getElementById("speed").textContent = `${number(Math.hypot(dx, dy) / (newest[1] - older[1]))} m/s`;
+      } else document.getElementById("speed").textContent = "— m/s";
+      const counts = map.counts || {};
+      document.getElementById("map-counts").textContent = `ว่าง ${counts.free_cells ?? 0} · กีดขวาง ${counts.occupied_cells ?? 0} · ไม่รู้จัก ${counts.unknown_cells ?? 0}`;
+      document.getElementById("dfs-status").textContent = map.exploration?.status || "แสดงแผนที่";
+      document.getElementById("map-message").textContent = `scan ${map.scan_count ?? 0} · match ${map.localization_score ?? "—"}`;
+      document.getElementById("pose").textContent = map.pose ? `X ${number(map.pose[0])} · Y ${number(map.pose[1])} · Yaw ${number(map.pose[2])}°` : "รอ pose จาก SLAM";
+    }
+
+    async function refreshMap() {
+      const response = await fetch("/api/map", {cache: "no-store"});
+      if (!response.ok) throw new Error("โหลดแผนที่ไม่สำเร็จ");
+      slamMap = await response.json();
+      drawMap();
+    }
+
+    function ensureChart(name) {
+      if (chartCards[name]) return chartCards[name];
+      document.getElementById("empty")?.remove();
+      const card = document.createElement("section"); card.className = "graph";
+      const title = document.createElement("div"); title.className = "graph-title";
+      const heading = document.createElement("strong"); heading.textContent = name;
+      const count = document.createElement("span"); count.className = "muted";
+      title.append(heading, count);
+      const canvas = document.createElement("canvas"); canvas.setAttribute("aria-label", `กราฟ ${name}`);
+      const legend = document.createElement("div"); legend.className = "series-legend";
+      const readout = document.createElement("div"); readout.className = "readout";
+      readout.textContent = "ชี้กราฟเพื่อดูค่า ณ เวลานั้น";
+      card.append(title, canvas, legend, readout);
+      document.getElementById("graphs").append(card);
+      const info = {canvas, legend, readout, count, hoverX: null, legendKey: ""};
+      canvas.addEventListener("mousemove", event => {
+        info.hoverX = event.offsetX; drawChart(name);
+      });
+      canvas.addEventListener("mouseleave", () => {
+        info.hoverX = null; readout.textContent = "ชี้กราฟเพื่อดูค่า ณ เวลานั้น"; drawChart(name);
+      });
+      chartCards[name] = info;
+      return info;
+    }
+
+    function drawChart(name) {
+      const card = ensureChart(name);
+      const {context: ctx, width: w, height: h} = canvasContext(card.canvas);
+      const all = history[name] || [];
+      card.count.textContent = `${all.length} จุดใน RAM`;
+      const visible = all.filter(sample => sample[1] >= (all.at(-1)?.[1] || 0) - 30);
+      const stride = Math.max(1, Math.ceil(visible.length / 300));
+      const samples = visible.filter((sample, index) => index % stride === 0 || index === visible.length - 1);
+      const margin = {left: 42, right: 10, top: 12, bottom: 25};
+      const pw = Math.max(1, w - margin.left - margin.right);
+      const ph = Math.max(1, h - margin.top - margin.bottom);
+      ctx.clearRect(0, 0, w, h);
+      ctx.font = "11px system-ui"; ctx.fillStyle = "#8ea7b7";
+      if (!samples.length) { ctx.fillText("รอข้อมูล…", margin.left, h / 2); return; }
+
+      const t0 = samples[0][1];
+      const t1 = Math.max(t0 + 0.01, samples.at(-1)[1]);
+      const expanded = samples.map(sample => fields(name, sample[2]));
+      const labels = expanded[0].map(field => field[0]);
+      const legendKey = labels.join("|");
+      if (legendKey !== card.legendKey) {
+        card.legend.replaceChildren();
+        labels.forEach((label, index) => {
+          const item = document.createElement("span");
+          item.textContent = label;
+          item.style.setProperty("--line", colors[index % colors.length]);
+          card.legend.append(item);
+        });
+        card.legendKey = legendKey;
+      }
+      const values = expanded.flat().map(field => field[1]);
+      if (!values.length) { ctx.fillText("ไม่มีค่าตัวเลข", margin.left, h / 2); return; }
+      let min = Math.min(...values); let max = Math.max(...values);
+      if (min === max) { min -= 1; max += 1; }
+      const pad = (max - min) * 0.08; min -= pad; max += pad;
+      const px = t => margin.left + (t - t0) / (t1 - t0) * pw;
+      const py = v => margin.top + (max - v) / (max - min) * ph;
+      ctx.strokeStyle = "#29404f"; ctx.lineWidth = 1;
+      for (let i = 0; i <= 2; i++) {
+        const y = margin.top + i * ph / 2;
+        ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(w - margin.right, y); ctx.stroke();
+        ctx.fillText(number(max - i * (max - min) / 2, 1), 2, y + 4);
+      }
+      ctx.fillText(`${number(t0, 1)}s`, margin.left, h - 5);
+      ctx.fillText(`${number(t1, 1)}s`, Math.max(margin.left, w - 52), h - 5);
+      labels.forEach((label, fieldIndex) => {
+        ctx.beginPath(); let begun = false;
+        expanded.forEach((row, index) => {
+          const item = row[fieldIndex];
+          if (!item) return;
+          const x = px(samples[index][1]); const y = py(item[1]);
+          if (!begun) { ctx.moveTo(x, y); begun = true; } else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = colors[fieldIndex % colors.length]; ctx.lineWidth = 1.8; ctx.stroke();
+      });
+
+      if (card.hoverX !== null) {
+        const fraction = Math.max(0, Math.min(1, (card.hoverX - margin.left) / pw));
+        const targetTime = t0 + fraction * (t1 - t0);
+        let best = 0;
+        for (let i = 1; i < visible.length; i++) {
+          if (Math.abs(visible[i][1] - targetTime) < Math.abs(visible[best][1] - targetTime)) best = i;
+        }
+        const selected = visible[best];
+        ctx.strokeStyle = "#dcebf0"; ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(px(selected[1]), margin.top); ctx.lineTo(px(selected[1]), margin.top + ph); ctx.stroke(); ctx.setLineDash([]);
+        card.readout.innerHTML = `<b>${number(selected[1], 2)} s</b> · ` +
+          fields(name, selected[2]).map(([label, value]) => `${label}: <b>${number(value)}</b>`).join(" · ");
+      }
+    }
+
+    async function refresh() {
+      if (busy) return;
+      busy = true;
+      try {
+        const [statusResponse, historyResponse, mapResponse] = await Promise.all([
+          fetch("/api/status", {cache: "no-store"}),
+          fetch(`/api/history?since=${cursor}`, {cache: "no-store"}),
+          fetch("/api/map", {cache: "no-store"}),
+        ]);
+        if (!statusResponse.ok || !historyResponse.ok || !mapResponse.ok) throw new Error("server response failed");
+        const status = await statusResponse.json();
+        const update = await historyResponse.json();
+        slamMap = await mapResponse.json();
+        latest = status.streams;
+        cursor = update.cursor;
+        Object.assign(columns, update.columns);
+        for (const [name, points] of Object.entries(update.streams)) {
+          if (!history[name]) history[name] = [];
+          history[name].push(...points);
+          if (history[name].length > 2000) history[name].splice(0, history[name].length - 2000);
+          drawChart(name);
+        }
+        document.getElementById("mission").textContent = status.mission_status;
+        document.getElementById("connection").textContent = "● เชื่อมต่อแล้ว";
+        const tofChannel = Math.max(1, Number(slamMap?.sensor_model?.tof_channel || 1));
+        const tofValue = status.streams.tof?.[tofChannel - 1];
+        document.getElementById("tof").textContent = tofValue > 0 ? `${number(tofValue, 0)} mm` : "— mm";
+        document.getElementById("gimbal-angle").textContent = status.streams.gimbal ? `yaw ${number(status.streams.gimbal[1])}° · pitch ${number(status.streams.gimbal[0])}°` : "—";
+        document.getElementById("camera-note").textContent = status.camera_error || (status.camera_ready ? "ภาพกำลังอัปเดต" : "รอภาพจากกล้อง…");
+        document.getElementById("graph-summary").textContent = `ชี้กราฟเพื่ออ่านค่า · CSV ข้าม ${status.dropped_csv_rows} แถว`;
+        document.getElementById("dfs-status").textContent = status.exploration?.status || (status.slam ? (status.slam.ready ? "SLAM ready" : "SLAM waiting") : "ปิด");
+        if (status.slam?.error) document.getElementById("map-message").textContent = `หยุด SLAM: ${status.slam.error}`;
+        drawMap();
+      } catch (error) {
+        document.getElementById("connection").textContent = "● ขาดการเชื่อมต่อ";
+      } finally { busy = false; }
+    }
+
+    window.addEventListener("resize", () => { drawMap(); Object.keys(chartCards).forEach(drawChart); });
+    document.getElementById("export-json").addEventListener("click", () => { window.location.href = "/api/map/export?format=json"; });
+    document.getElementById("export-ros").addEventListener("click", () => { window.location.href = "/api/map/export?format=ros"; });
+    document.getElementById("load-map").addEventListener("click", () => document.getElementById("map-file").click());
+    document.getElementById("map-file").addEventListener("change", async event => {
+      const file = event.target.files?.[0]; if (!file) return;
+      try {
+        const response = await fetch("/api/map/import", {method: "POST", headers: {"Content-Type": "application/json"}, body: await file.text()});
+        if (!response.ok) throw new Error(await response.text());
+        document.getElementById("map-message").textContent = `เปิด ${file.name} แล้ว`;
+        await refreshMap();
+      } catch (error) { document.getElementById("map-message").textContent = `เปิดแผนที่ไม่ได้: ${error.message}`; }
+      finally { event.target.value = ""; }
+    });
+    refresh();
+    setInterval(refresh, 1000);
+  </script>
+</body>
+</html>

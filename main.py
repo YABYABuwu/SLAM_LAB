@@ -1,0 +1,140 @@
+"""Connect the robot and run telemetry, waypoint missions, or DFS exploration."""
+
+from pathlib import Path
+import time
+
+from src.chassis import ChassisController
+from src.config_loader import load_config
+from src.dashboard import Dashboard
+from src.explorer import DFSExplorer
+from src.logger import SensorLogger
+from src.slam import OccupancyGridSLAM, SlamWorker
+
+
+def main():
+    config = load_config()
+    project_dir = Path(__file__).resolve().parent
+    log_settings = config["logging"].copy()
+    log_settings["directory"] = project_dir / log_settings["directory"]
+    exploration_settings = config["exploration"]
+    map_settings = exploration_settings["map"]
+    if map_settings["save_path"]:
+        map_settings["save_path"] = project_dir / map_settings["save_path"]
+    if map_settings["load_path"]:
+        map_settings["load_path"] = project_dir / map_settings["load_path"]
+    slam_map = OccupancyGridSLAM(exploration_settings)
+    if map_settings["load_path"]:
+        slam_map.load_file(map_settings["load_path"])
+    if exploration_settings["enabled"]:
+        log_settings["position_cs"] = exploration_settings["position_coordinate_system"]
+
+    # Import here so config errors are shown before any SDK connection attempt.
+    from robomaster import robot
+
+    ep_robot = robot.Robot()
+    logger = None
+    chassis = None
+    dashboard = None
+    slam_worker = None
+    explorer = None
+    connected = False
+    try:
+        ep_robot.initialize(conn_type=config["connection"]["type"])
+        connected = True
+        logger = SensorLogger(ep_robot, log_settings)
+        logger.start()
+        motion_settings = config["motion"].copy()
+        if exploration_settings["enabled"]:
+            motion_settings["max_speed_m_s"] = min(
+                motion_settings["max_speed_m_s"], exploration_settings["max_speed_m_s"]
+            )
+        chassis = ChassisController(ep_robot, logger, motion_settings)
+        if exploration_settings["enabled"]:
+            slam_worker = SlamWorker(logger, slam_map, exploration_settings)
+            explorer = DFSExplorer(chassis, ep_robot.gimbal, logger, slam_map,
+                                    exploration_settings)
+            slam_worker.start()
+        print("Connected. Logs:", logger.run_dir or "disabled")
+        if config["dashboard"]["enabled"]:
+            dashboard = Dashboard(ep_robot, logger, config["dashboard"],
+                                  slam_map=slam_map, slam_worker=slam_worker,
+                                  explorer=explorer)
+            dashboard.start()
+            host = config["dashboard"]["host"]
+            port = config["dashboard"]["port"]
+            print(f"Dashboard: http://{host}:{port}")
+
+        if exploration_settings["enabled"]:
+            if dashboard is not None:
+                dashboard.mission_status = "SLAM readying"
+            logger.wait_for("position", exploration_settings["sample_timeout_s"])
+            logger.wait_for("attitude", exploration_settings["sample_timeout_s"])
+            logger.wait_for("tof", exploration_settings["sample_timeout_s"])
+            logger.wait_for("gimbal", exploration_settings["sample_timeout_s"])
+            logger.wait_for("status", exploration_settings["sample_timeout_s"])
+            slam_worker.wait_ready(exploration_settings["sample_timeout_s"] * 4)
+            explorer.run(slam_worker)
+            slam_worker.stop(map_settings["save_path"])
+            if dashboard is not None:
+                dashboard.mission_status = f"Exploration {explorer.status}"
+            logger.run_status = "completed"
+        elif config["mission"]["enabled"]:
+            logger.wait_for("position", config["motion"]["sample_timeout_s"])
+            logger.wait_for("attitude", config["motion"]["sample_timeout_s"])
+            for point in config["mission"]["waypoints"]:
+                if dashboard is not None:
+                    dashboard.mission_status = f"Moving to {point}"
+                pose = chassis.move_to(point["x"], point["y"], point.get("yaw"))
+                print("Reached:", pose)
+            if dashboard is not None:
+                dashboard.mission_status = "Mission complete"
+            logger.run_status = "completed"
+        else:
+            if dashboard is None:
+                duration = config["logging"]["preview_duration_s"]
+                print(f"Mission disabled. Recording telemetry for {duration} s.")
+                time.sleep(duration)
+                print("Position:", logger.get_latest("position"))
+                print("Attitude:", logger.get_latest("attitude"))
+            logger.run_status = "completed"
+
+        if dashboard is not None:
+            print("Dashboard is open. Press Ctrl+C to stop.")
+            while True:
+                if dashboard.camera_error is not None:
+                    raise RuntimeError(f"camera error: {dashboard.camera_error}")
+                time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("Stopped by user")
+        if logger is not None and logger.run_status == "running":
+            logger.run_status = "interrupted"
+    except Exception as error:
+        if logger is not None:
+            logger.run_status = "failed"
+            logger.run_error = str(error)
+        raise
+    finally:
+        try:
+            if chassis is not None:
+                chassis.stop()
+        finally:
+            try:
+                if slam_worker is not None:
+                    slam_worker.stop(map_settings["save_path"])
+            finally:
+                try:
+                    if dashboard is not None:
+                        dashboard.stop()
+                finally:
+                    try:
+                        if logger is not None:
+                            logger.stop()
+                            if logger.dropped_rows:
+                                print(f"Warning: skipped {logger.dropped_rows} CSV rows (queue full)")
+                    finally:
+                        if connected:
+                            ep_robot.close()
+
+
+if __name__ == "__main__":
+    main()

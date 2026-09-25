@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoboMaster Run Review</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #0a121c; color: #eef5f7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 20px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 1.55rem; }
+    h2 { font-size: 1rem; }
+    .muted { color: #99acb9; font-size: .82rem; }
+    header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 16px; }
+    .brand { display: flex; gap: 12px; align-items: center; }
+    .brand-mark { width: 11px; height: 38px; border-radius: 4px; background: #ffb968; box-shadow: 0 0 18px #ffb96888; }
+    .run-picker { display: flex; align-items: center; gap: 9px; }
+    select, button { background: #172b3a; color: #e8f2f5; border: 1px solid #365469; border-radius: 8px; padding: 9px 11px; font: inherit; }
+    select { min-width: 200px; }
+    button { cursor: pointer; }
+    button:hover { border-color: #78c9e5; }
+    .card { background: #12202c; border: 1px solid #284052; border-radius: 14px; overflow: hidden; }
+    .head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; padding: 13px 16px; border-bottom: 1px solid #294051; }
+    .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+    .metric { padding: 14px 16px; }
+    .metric strong { display: block; margin-top: 5px; font-size: 1.28rem; font-variant-numeric: tabular-nums; }
+    .good { color: #86e9ca; } .warn { color: #ffca83; } .bad { color: #ff9292; }
+    .timeline { position: sticky; top: 0; z-index: 10; display: flex; gap: 12px; align-items: center; padding: 12px 15px; margin-bottom: 14px; background: #162837f5; box-shadow: 0 8px 20px #0004; }
+    .timeline input { flex: 1; accent-color: #ffb968; min-width: 70px; }
+    .time { min-width: 118px; text-align: right; font-variant-numeric: tabular-nums; }
+    .layout { display: grid; grid-template-columns: minmax(340px, .9fr) minmax(400px, 1.1fr); gap: 14px; align-items: start; max-width: 1800px; margin: auto; }
+    .left { display: grid; gap: 14px; }
+    .map-body { padding: 14px; position: relative; }
+    #map { width: 100%; height: 330px; display: block; background: #0a1721; border-radius: 9px; }
+    .map-key { display: flex; flex-wrap: wrap; gap: 8px 15px; padding-top: 10px; color: #a9c0ce; font-size: .75rem; }
+    .key::before { content: ""; display: inline-block; width: 11px; height: 3px; margin-right: 5px; background: var(--line); vertical-align: middle; }
+    .values { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 13px; }
+    .value { background: #0b1a26; border-radius: 8px; padding: 10px; }
+    .value span { display: block; color: #9bafbd; font-size: .75rem; }
+    .value strong { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+    .issues { padding: 12px; max-height: 270px; overflow: auto; }
+    .issue { display: flex; gap: 9px; align-items: baseline; width: 100%; text-align: left; margin-bottom: 7px; border-color: #294558; font-size: .81rem; }
+    .issue small { color: #f7bd78; white-space: nowrap; }
+    .graphs { display: grid; gap: 12px; padding: 13px; max-height: calc(100vh - 220px); overflow: auto; }
+    .graph { border: 1px solid #294558; background: #0b1a26; border-radius: 10px; padding: 11px; }
+    .graph-top { display: flex; justify-content: space-between; gap: 8px; font-size: .8rem; margin-bottom: 6px; }
+    .graph-top strong { text-transform: uppercase; letter-spacing: .06em; }
+    .graph canvas { width: 100%; height: 155px; display: block; cursor: crosshair; }
+    .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; color: #a6bac8; font-size: .69rem; margin: 5px 0; }
+    .legend span::before { content: ""; display: inline-block; width: 10px; height: 3px; margin-right: 4px; vertical-align: middle; background: var(--line); }
+    .readout { min-height: 34px; color: #d4e3e9; font-size: .75rem; overflow-wrap: anywhere; }
+    .download { color: #86d8f0; text-decoration: none; font-size: .75rem; }
+    .download:hover { text-decoration: underline; }
+    #empty { padding: 25px; text-align: center; }
+    @media (max-width: 950px) { .layout { grid-template-columns: 1fr; } .graphs { max-height: none; } }
+    @media (max-width: 650px) { body { padding: 11px; } header { align-items: flex-start; flex-direction: column; } .summary { grid-template-columns: repeat(2, 1fr); } .timeline { flex-wrap: wrap; } .timeline input { order: 3; flex-basis: 100%; } .layout { display: block; } .left { margin-bottom: 14px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand"><div class="brand-mark"></div><div><h1>Run Review</h1><p class="muted">ย้อนดูข้อมูลที่บันทึกไว้ โดยไม่ต้องเชื่อมต่อหุ่นยนต์</p></div></div>
+    <div class="run-picker"><label for="run">เลือก run</label><select id="run"><option>กำลังค้นหา…</option></select></div>
+  </header>
+  <div class="summary" id="summary">
+    <div class="card metric"><span class="muted">สถานะ</span><strong id="run-status">—</strong></div>
+    <div class="card metric"><span class="muted">ระยะเวลา</span><strong id="duration">—</strong></div>
+    <div class="card metric"><span class="muted">CSV stream</span><strong id="stream-count">—</strong></div>
+    <div class="card metric"><span class="muted">แถวที่ข้าม</span><strong id="dropped">—</strong></div>
+  </div>
+  <div class="card timeline">
+    <button id="play" type="button">▶ เล่น</button>
+    <label for="speed">ความเร็ว</label><select id="speed"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select>
+    <input id="seek" type="range" min="0" max="1" step="0.01" value="0">
+    <strong class="time" id="clock">0.00 / 0.00 s</strong>
+  </div>
+  <main class="layout">
+    <div class="left">
+      <section class="card"><div class="head"><h2>เส้นทางย้อนหลัง</h2><span class="muted">เลื่อนเวลาเพื่อดูตำแหน่ง/ทิศ</span></div>
+        <div class="map-body"><canvas id="map" aria-label="แผนที่เส้นทางย้อนหลัง"></canvas>
+          <div class="map-key"><span class="key" style="--line:#66d6ff">ผ่านมาแล้ว</span><span class="key" style="--line:#496579">ช่วงถัดไป</span><span class="key" style="--line:#ffb868">ตัวรถ</span><span class="key" style="--line:#8df2d1">Gimbal</span></div>
+        </div>
+      </section>
+      <section class="card"><div class="head"><h2>ค่าที่เวลาที่เลือก</h2><span class="muted" id="sample-time">—</span></div><div class="values" id="values"></div></section>
+      <section class="card"><div class="head"><h2>จุดที่ควรตรวจ</h2><span class="muted">คลิกเพื่อกระโดดไปช่วงนั้น</span></div><div class="issues" id="issues"><p class="muted">เลือก run ก่อน</p></div></section>
+      <section class="card"><div class="head"><h2>ภาพย้อนหลัง</h2></div><p class="muted" style="padding:15px">เวอร์ชันนี้บันทึกเฉพาะข้อมูลเซนเซอร์และตำแหน่ง ยังไม่มีไฟล์ภาพย้อนหลัง</p></section>
+    </div>
+    <section class="card"><div class="head"><h2>กราฟข้อมูลที่บันทึก</h2><span class="muted">ชี้กราฟเพื่อเลื่อนเวลาทุกส่วนพร้อมกัน</span></div><div class="graphs" id="graphs"><p class="muted" id="empty">ยังไม่มี run ที่บันทึกไว้</p></div></section>
+  </main>
+  <script>
+    const colors = ["#6ed9ff", "#ffb967", "#8cf1d2", "#c5a5ff", "#f28bb5", "#f6d67d", "#8daeff", "#b6dc88"];
+    let run = null;
+    let currentTime = 0;
+    let playing = false;
+    let previousFrame = null;
+    let knownRuns = [];
+    let selectedRevision = null;
+    let refreshingRuns = false;
+    let loadToken = 0;
+    const charts = {};
+
+    function format(value, digits = 2) {
+      return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "—";
+    }
+
+    function canvasContext(canvas) {
+      const width = canvas.clientWidth, height = canvas.clientHeight;
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.round(width * ratio));
+      canvas.height = Math.max(1, Math.round(height * ratio));
+      const ctx = canvas.getContext("2d"); ctx.scale(ratio, ratio);
+      return {ctx, width, height};
+    }
+
+    function fields(columns, values) {
+      const result = [];
+      values.forEach((value, index) => {
+        const label = columns[index] || `value_${index + 1}`;
+        if (Array.isArray(value)) {
+          value.forEach((part, subindex) => {
+            const number = Number(part);
+            if (part !== null && Number.isFinite(number)) result.push([`${label}_${subindex + 1}`, number]);
+          });
+        } else {
+          const number = Number(value);
+          if (value !== null && Number.isFinite(number)) result.push([label, number]);
+        }
+      });
+      return result;
+    }
+
+    function nearest(samples, time) {
+      if (!samples?.length) return null;
+      let low = 0, high = samples.length - 1;
+      while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        if (samples[mid][1] < time) low = mid + 1; else high = mid;
+      }
+      if (low > 0 && Math.abs(samples[low - 1][1] - time) < Math.abs(samples[low][1] - time)) return samples[low - 1];
+      return samples[low];
+    }
+
+    function sampleAt(name) { return nearest(run?.streams?.[name]?.samples, currentTime); }
+
+    function setTime(time) {
+      if (!run) return;
+      currentTime = Math.max(0, Math.min(run.duration_s, time));
+      document.getElementById("seek").value = currentTime;
+      document.getElementById("clock").textContent = `${format(currentTime)} / ${format(run.duration_s)} s`;
+      document.getElementById("sample-time").textContent = `${format(currentTime)} s`;
+      drawMap(); drawValues();
+      Object.keys(charts).forEach(drawChart);
+    }
+
+    function drawMap() {
+      const {ctx, width: w, height: h} = canvasContext(document.getElementById("map"));
+      ctx.fillStyle = "#0a1721"; ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = "#1d3442"; ctx.lineWidth = 1;
+      for (let x = 0; x < w; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+      for (let y = 0; y < h; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+      const points = run?.streams?.position?.samples || [];
+      if (!points.length) {
+        ctx.fillStyle = "#a8bdc9"; ctx.textAlign = "center";
+        ctx.fillText("run นี้ไม่มี position.csv", w / 2, h / 2); return;
+      }
+      let minX = 0, maxX = 0, minY = 0, maxY = 0;
+      for (const point of points) {
+        const x = Number(point[2][0]), y = Number(point[2][1]);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+      const midX = (minX + maxX) / 2, midY = (minY + maxY) / 2;
+      const scale = Math.min((h - 65) / Math.max(1.5, maxX - minX), (w - 65) / Math.max(1.5, maxY - minY));
+      const project = (x, y) => [w / 2 - (y - midY) * scale, h / 2 - (x - midX) * scale];
+      ctx.beginPath();
+      for (let i = 0; i < points.length; i++) {
+        const [x, y] = project(Number(points[i][2][0]), Number(points[i][2][1]));
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = "#496579"; ctx.lineWidth = 2; ctx.stroke();
+      ctx.beginPath(); let started = false;
+      for (const point of points) {
+        if (point[1] > currentTime) break;
+        const [x, y] = project(Number(point[2][0]), Number(point[2][1]));
+        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = "#66d6ff"; ctx.lineWidth = 2.5; ctx.stroke();
+      const position = sampleAt("position");
+      if (!position) return;
+      const [cx, cy] = project(Number(position[2][0]), Number(position[2][1]));
+      const angle = Number(sampleAt("attitude")?.[2]?.[0] || 0) * Math.PI / 180;
+      const forward = [-Math.sin(angle), -Math.cos(angle)];
+      const side = [-forward[1], forward[0]];
+      ctx.beginPath(); ctx.moveTo(cx + forward[0] * 17, cy + forward[1] * 17);
+      ctx.lineTo(cx - forward[0] * 11 + side[0] * 9, cy - forward[1] * 11 + side[1] * 9);
+      ctx.lineTo(cx - forward[0] * 11 - side[0] * 9, cy - forward[1] * 11 - side[1] * 9);
+      ctx.closePath(); ctx.fillStyle = "#ffb868"; ctx.fill();
+      const gimbal = sampleAt("gimbal");
+      if (gimbal) {
+        const direction = angle + Number(gimbal[2][1] || 0) * Math.PI / 180;
+        ctx.beginPath(); ctx.moveTo(cx, cy);
+        ctx.lineTo(cx - Math.sin(direction) * 31, cy - Math.cos(direction) * 31);
+        ctx.strokeStyle = "#8df2d1"; ctx.lineWidth = 3; ctx.stroke();
+      }
+    }
+
+    function speedAt(time) {
+      const samples = run?.streams?.position?.samples || [];
+      const now = nearest(samples, time);
+      if (!now) return null;
+      const before = nearest(samples, Math.max(0, now[1] - 0.5));
+      if (!before || before === now || now[1] === before[1]) return null;
+      const dx = Number(now[2][0]) - Number(before[2][0]);
+      const dy = Number(now[2][1]) - Number(before[2][1]);
+      return Math.hypot(dx, dy) / (now[1] - before[1]);
+    }
+
+    function drawValues() {
+      const box = document.getElementById("values"); box.replaceChildren();
+      const position = sampleAt("position")?.[2];
+      const attitude = sampleAt("attitude")?.[2];
+      const tof = sampleAt("tof")?.[2];
+      const gimbal = sampleAt("gimbal")?.[2];
+      const battery = sampleAt("battery")?.[2];
+      const items = [
+        ["X / Y", position ? `${format(position[0])} / ${format(position[1])} m` : "—"],
+        ["Yaw รถ", attitude ? `${format(attitude[0])}°` : "—"],
+        ["ความเร็วประมาณ", `${format(speedAt(currentTime))} m/s`],
+        ["ToF #1", tof ? `${format(tof[0], 0)} mm` : "—"],
+        ["Yaw / Pitch gimbal", gimbal ? `${format(gimbal[1])}° / ${format(gimbal[0])}°` : "—"],
+        ["Battery", battery ? `${format(battery[0], 0)}%` : "—"],
+      ];
+      for (const [label, value] of items) {
+        const card = document.createElement("div"); card.className = "value";
+        const title = document.createElement("span"); title.textContent = label;
+        const number = document.createElement("strong"); number.textContent = value;
+        card.append(title, number); box.append(card);
+      }
+    }
+
+    function drawChart(name) {
+      const info = charts[name], stream = run.streams[name];
+      const {ctx, width: w, height: h} = canvasContext(info.canvas);
+      ctx.clearRect(0, 0, w, h);
+      const samples = stream.samples;
+      if (!samples.length) return;
+      const margin = {left: 43, right: 10, top: 10, bottom: 24};
+      const pw = Math.max(1, w - margin.left - margin.right), ph = Math.max(1, h - margin.top - margin.bottom);
+      const first = samples[0][1], last = Math.max(first + .01, samples.at(-1)[1]);
+      const stride = Math.max(1, Math.ceil(samples.length / 500));
+      const plotted = samples.filter((row, index) => index % stride === 0 || index === samples.length - 1);
+      const expanded = plotted.map(row => fields(stream.columns, row[2]));
+      const labels = expanded[0]?.map(item => item[0]) || [];
+      const values = expanded.flat().map(item => item[1]);
+      if (!values.length) return;
+      let min = Math.min(...values), max = Math.max(...values);
+      if (min === max) { min -= 1; max += 1; }
+      const padding = (max - min) * .08; min -= padding; max += padding;
+      const px = t => margin.left + (t - first) / (last - first) * pw;
+      const py = v => margin.top + (max - v) / (max - min) * ph;
+      ctx.font = "11px system-ui"; ctx.fillStyle = "#91aab9"; ctx.strokeStyle = "#294356";
+      for (let i = 0; i <= 2; i++) {
+        const y = margin.top + i * ph / 2;
+        ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(w - margin.right, y); ctx.stroke();
+        ctx.fillText(format(max - i * (max - min) / 2, 1), 2, y + 4);
+      }
+      ctx.fillText(`${format(first, 1)}s`, margin.left, h - 5);
+      ctx.fillText(`${format(last, 1)}s`, Math.max(margin.left, w - 54), h - 5);
+      labels.forEach((label, column) => {
+        ctx.beginPath(); let begun = false;
+        for (let i = 0; i < plotted.length; i++) {
+          const item = expanded[i][column]; if (!item) continue;
+          const x = px(plotted[i][1]), y = py(item[1]);
+          if (!begun) { ctx.moveTo(x, y); begun = true; } else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = colors[column % colors.length]; ctx.lineWidth = 1.8; ctx.stroke();
+      });
+      ctx.strokeStyle = "#dcebf0"; ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(px(currentTime), margin.top); ctx.lineTo(px(currentTime), margin.top + ph); ctx.stroke(); ctx.setLineDash([]);
+      const selected = nearest(samples, currentTime);
+      info.readout.textContent = selected ? `${format(selected[1])} s · ` + fields(stream.columns, selected[2]).map(([label, value]) => `${label}: ${format(value)}`).join(" · ") : "—";
+    }
+
+    function buildCharts() {
+      const box = document.getElementById("graphs"); box.replaceChildren();
+      for (const name of Object.keys(charts)) delete charts[name];
+      const names = Object.keys(run.streams);
+      if (!names.length) { box.textContent = "run นี้ไม่มี CSV"; return; }
+      for (const name of names) {
+        const stream = run.streams[name];
+        const card = document.createElement("section"); card.className = "graph";
+        const top = document.createElement("div"); top.className = "graph-top";
+        const title = document.createElement("strong"); title.textContent = name;
+        const count = document.createElement("span"); count.className = "muted";
+        count.textContent = `${stream.displayed_rows.toLocaleString()} / ${stream.total_rows.toLocaleString()} จุด`;
+        top.append(title, count);
+        const canvas = document.createElement("canvas"); canvas.setAttribute("aria-label", `กราฟ ${name}`);
+        const legend = document.createElement("div"); legend.className = "legend";
+        const sample = stream.samples.find(row => fields(stream.columns, row[2]).length);
+        const labels = sample ? fields(stream.columns, sample[2]).map(item => item[0]) : [];
+        labels.forEach((label, index) => {
+          const item = document.createElement("span"); item.textContent = label;
+          item.style.setProperty("--line", colors[index % colors.length]); legend.append(item);
+        });
+        const readout = document.createElement("div"); readout.className = "readout";
+        const link = document.createElement("a"); link.className = "download";
+        link.href = `/api/csv?run=${encodeURIComponent(run.name)}&stream=${encodeURIComponent(name)}`;
+        link.textContent = `ดาวน์โหลด ${name}.csv`;
+        card.append(top, canvas, legend, readout, link); box.append(card);
+        charts[name] = {canvas, readout};
+        canvas.addEventListener("mousemove", event => {
+          const samples = stream.samples; if (!samples.length) return;
+          const fraction = Math.max(0, Math.min(1, (event.offsetX - 43) / Math.max(1, canvas.clientWidth - 53)));
+          const time = samples[0][1] + fraction * (samples.at(-1)[1] - samples[0][1]);
+          setTime(time);
+        });
+      }
+    }
+
+    function showIssues() {
+      const box = document.getElementById("issues"); box.replaceChildren();
+      if (!run.issues.length) { box.textContent = "ไม่พบเหตุผิดปกติจากข้อมูลที่บันทึก"; return; }
+      for (const issue of run.issues) {
+        const item = document.createElement("button"); item.type = "button"; item.className = "issue";
+        const time = document.createElement("small"); time.textContent = issue.time_s === null ? "สรุป" : `${format(issue.time_s)} s`;
+        const message = document.createElement("span"); message.textContent = issue.message;
+        item.append(time, message);
+        if (issue.time_s !== null) item.addEventListener("click", () => setTime(issue.time_s));
+        box.append(item);
+      }
+    }
+
+    async function loadRun(name, {refresh = false, startAtEnd = false} = {}) {
+      const token = ++loadToken;
+      const response = await fetch(`/api/run?name=${encodeURIComponent(name)}`);
+      if (!response.ok) throw new Error("โหลด run ไม่สำเร็จ");
+      const loaded = await response.json();
+      if (token !== loadToken) return;
+      const previous = run?.name === name ? run : null;
+      const followEnd = refresh && previous && currentTime >= previous.duration_s - .1;
+      const savedTime = currentTime;
+      if (!refresh) {
+        playing = false;
+        document.getElementById("play").textContent = "▶ เล่น";
+      }
+      run = loaded;
+      selectedRevision = knownRuns.find(item => item.name === name)?.revision ?? null;
+      const status = run.summary.status || "ไม่มีสรุป";
+      const statusElement = document.getElementById("run-status"); statusElement.textContent = status;
+      statusElement.className = status === "completed" ? "good" : status === "failed" ? "bad" : "warn";
+      document.getElementById("duration").textContent = `${format(run.duration_s)} s`;
+      document.getElementById("stream-count").textContent = Object.keys(run.streams).length;
+      document.getElementById("dropped").textContent = run.summary.dropped_csv_rows ?? "—";
+      document.getElementById("seek").max = Math.max(.01, run.duration_s);
+      buildCharts(); showIssues();
+      setTime(startAtEnd || followEnd ? run.duration_s : refresh ? savedTime : 0);
+    }
+
+    async function refreshRuns() {
+      if (refreshingRuns) return;
+      refreshingRuns = true;
+      try {
+        const response = await fetch("/api/runs");
+        if (!response.ok) throw new Error("โหลดรายการ run ไม่สำเร็จ");
+        const runs = await response.json();
+        const picker = document.getElementById("run");
+        const oldFirst = knownRuns[0]?.name;
+        const selectedName = run?.name;
+        const newFirst = runs[0]?.name;
+        const namesChanged = picker.options[0]?.textContent === "กำลังค้นหา…" ||
+          runs.length !== knownRuns.length || runs.some((item, index) =>
+            item.name !== knownRuns[index]?.name || item.streams.length !== knownRuns[index]?.streams.length);
+        knownRuns = runs;
+        if (namesChanged) {
+          picker.replaceChildren();
+          if (!runs.length) {
+            const option = document.createElement("option"); option.textContent = "ยังไม่มี run"; picker.append(option);
+          }
+          for (const item of runs) {
+            const option = document.createElement("option"); option.value = item.name;
+            option.textContent = `${item.name} (${item.streams.length} CSV)`; picker.append(option);
+          }
+          if (selectedName && runs.some(item => item.name === selectedName)) picker.value = selectedName;
+        }
+        if (!runs.length) return;
+        if (!run) {
+          picker.value = newFirst;
+          await loadRun(newFirst);
+        } else if (!runs.some(item => item.name === selectedName)) {
+          picker.value = newFirst;
+          await loadRun(newFirst);
+        } else if (newFirst !== oldFirst && selectedName === oldFirst) {
+          picker.value = newFirst;
+          await loadRun(newFirst, {startAtEnd: true});
+        } else {
+          const selected = runs.find(item => item.name === selectedName);
+          if (selected && selected.revision !== selectedRevision) {
+            await loadRun(selectedName, {refresh: true});
+          }
+        }
+      } finally {
+        refreshingRuns = false;
+      }
+    }
+
+    function frame(timestamp) {
+      if (!playing) return;
+      if (previousFrame !== null) setTime(currentTime + (timestamp - previousFrame) / 1000 * Number(document.getElementById("speed").value));
+      previousFrame = timestamp;
+      if (currentTime >= run.duration_s) { playing = false; document.getElementById("play").textContent = "▶ เล่น"; return; }
+      requestAnimationFrame(frame);
+    }
+
+    document.getElementById("run").addEventListener("change", event => {
+      loadRun(event.target.value).catch(error => alert(error.message));
+    });
+    document.getElementById("seek").addEventListener("input", event => setTime(Number(event.target.value)));
+    document.getElementById("play").addEventListener("click", () => {
+      if (!run) return;
+      playing = !playing;
+      document.getElementById("play").textContent = playing ? "Ⅱ หยุด" : "▶ เล่น";
+      previousFrame = null;
+      if (playing) { if (currentTime >= run.duration_s) setTime(0); requestAnimationFrame(frame); }
+    });
+    window.addEventListener("resize", () => { if (run) setTime(currentTime); });
+    refreshRuns().catch(error => { document.getElementById("empty").textContent = error.message; });
+    setInterval(() => refreshRuns().catch(error => console.error(error)), 3000);
+  </script>
+</body>
+</html>

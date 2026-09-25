@@ -1,0 +1,3 @@
+robomaster
+PyYAML
+# OpenCV is installed by robomaster and is used only when dashboard is enabled.
