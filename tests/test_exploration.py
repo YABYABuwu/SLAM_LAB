@@ -65,6 +65,7 @@ class SimulatedGimbal:
         self.pitch = 0.0
         self.scan_time = time.time()
         self.commands = []
+        self.recenter_calls = 0
         self.logger.set("gimbal", (0, 0, 0, 0), self.scan_time)
 
     def _range(self, pose):
@@ -80,6 +81,10 @@ class SimulatedGimbal:
         pose = tuple(self.slam_map.pose)
         self.slam_map.update(pose, self._range(pose), timestamp=self.scan_time,
                              gimbal_yaw_deg=self.yaw)
+
+    def recenter(self, pitch_speed, yaw_speed):
+        self.recenter_calls += 1
+        self.moveto(pitch=0, yaw=0, pitch_speed=pitch_speed, yaw_speed=yaw_speed)
 
 
 class SimulatedChassis:
@@ -319,6 +324,24 @@ class ExplorationTests(unittest.TestCase):
         self.assertEqual(measured_mm, 2000)
         self.assertEqual(world_yaw, 179)
         self.assertAlmostEqual(gimbal.commands[-1][1], 0)
+        self.assertEqual(gimbal.recenter_calls, 1)
+
+    def test_gimbal_front_scan_preserves_nonzero_configured_pitch(self):
+        settings = copy.deepcopy(self.settings)
+        settings["gimbal"]["pitch_deg"] = 5
+        slam_map = OccupancyGridSLAM(settings)
+        slam_map.update((0, 0, 0), 2000)
+        logger = FakeLogger()
+        logger.set("attitude", (0, 0, 0))
+        gimbal = SimulatedGimbal(slam_map, logger, 2000)
+        explorer = DFSExplorer(None, gimbal, logger, slam_map, settings)
+        explorer.base_pose = (0, 0, 0)
+        explorer.slam_worker = FakeSlamWorker()
+
+        explorer._scan_for_direction((1, 0))
+
+        self.assertEqual(gimbal.recenter_calls, 0)
+        self.assertAlmostEqual(gimbal.commands[-1][0], 5)
 
     def test_installed_sdk_moveto_uses_chassis_relative_yaw(self):
         from robomaster.gimbal import COORDINATE_YCPN, GimbalMoveAction

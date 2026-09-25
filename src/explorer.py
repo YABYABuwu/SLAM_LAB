@@ -94,12 +94,23 @@ class DFSExplorer:
         command_yaw = self._command_yaw(target_yaw, current_yaw)
         request_time = time.time()
         tolerance = self.settings["gimbal"]["angle_tolerance_deg"]
-        self.gimbal.moveto(
-            pitch=self.settings["gimbal"]["pitch_deg"],
-            yaw=command_yaw,
-            pitch_speed=30,
-            yaw_speed=self.settings["gimbal"]["yaw_speed_deg_s"],
-        )
+        use_recenter = (abs(target_yaw) <= tolerance and
+                        abs(self.settings["gimbal"]["pitch_deg"]) <= 0.1)
+        previous_status = self.status
+        self._set_status("recentering" if use_recenter else "scanning")
+        if use_recenter:
+            command_yaw = 0.0
+            self.gimbal.recenter(
+                pitch_speed=30,
+                yaw_speed=self.settings["gimbal"]["yaw_speed_deg_s"],
+            )
+        else:
+            self.gimbal.moveto(
+                pitch=self.settings["gimbal"]["pitch_deg"],
+                yaw=command_yaw,
+                pitch_speed=30,
+                yaw_speed=self.settings["gimbal"]["yaw_speed_deg_s"],
+            )
 
         expected_motion_s = abs(command_yaw - current_yaw) / self.settings["gimbal"]["yaw_speed_deg_s"]
         deadline = time.monotonic() + (
@@ -126,6 +137,7 @@ class DFSExplorer:
                     abs(_wrap_degrees(target_yaw - scan_yaw)) <= tolerance and
                     scan_range is not None and
                     time.time() - scan_timestamp <= self.settings["sample_timeout_s"] * 2):
+                self._set_status(previous_status)
                 return float(scan_range), world_yaw
             time.sleep(0.03)
         raise TimeoutError(
