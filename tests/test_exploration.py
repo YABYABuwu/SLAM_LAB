@@ -101,7 +101,8 @@ class SimulatedChassis:
             raise RuntimeError("simulated motion aborted")
         pose = (x, y, yaw or 0.0)
         self.commands.append(pose)
-        self.scan_time += 0.01
+        self.scan_time = max(time.time(), self.scan_time,
+                             self.slam_map.latest_scan_timestamp or 0) + 0.01
         self.logger.set("attitude", (pose[2], 0, 0), self.scan_time)
         readings = (self.ranges(pose, self.gimbal.yaw)
                     if callable(self.ranges) else self.ranges)
@@ -269,6 +270,34 @@ class ExplorationTests(unittest.TestCase):
         self.assertAlmostEqual(slam_map.pose[0], 0.0)
         self.assertAlmostEqual(slam_map.pose[1], 0.0)
         self.assertEqual(slam_map.exploration_state["status"], "node_limit_returned")
+
+    def test_dfs_scans_four_directions_before_every_move(self):
+        class CheckingChassis(SimulatedChassis):
+            def __init__(self, slam_map, logger, gimbal, ranges):
+                super().__init__(slam_map, logger, gimbal, ranges)
+                self.previous_scan_count = 0
+
+            def move_to(self, x, y, yaw=None, abort_event=None):
+                new_scans = self.gimbal.commands[self.previous_scan_count:]
+                if not self.commands:
+                    self_test.assertEqual([round(command[1]) for command in new_scans[:4]],
+                                          [0, -90, -180, 90])
+                self_test.assertGreaterEqual(len(new_scans), 4)
+                self.previous_scan_count = len(self.gimbal.commands)
+                return super().move_to(x, y, yaw=yaw, abort_event=abort_event)
+
+        self_test = self
+        slam_map = self.make_map()
+        logger = FakeLogger()
+        logger.set("attitude", (0, 0, 0))
+        gimbal = SimulatedGimbal(slam_map, logger, self.ranges)
+        chassis = CheckingChassis(slam_map, logger, gimbal, self.ranges)
+        settings = dict(self.settings)
+        settings["max_nodes"] = 2
+        result = DFSExplorer(chassis, gimbal, logger, slam_map, settings).run(FakeSlamWorker())
+
+        self.assertEqual(result["status"], "node_limit_returned")
+        self.assertEqual(len(chassis.commands), 2)
 
     def test_dfs_does_not_move_when_all_sensor_ranges_are_blocked(self):
         blocked_ranges = [300, 300, 300, 300]

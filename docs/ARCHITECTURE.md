@@ -33,7 +33,7 @@ review.py → RunStore(data/raw) → /api/runs, /api/run, /api/csv → review/in
 | `src/chassis.py`, `src/PID.py` | `move_to` ใช้ position/attitude ที่ยังสด, แปลงความเร็วจากกรอบโลกเป็นกรอบรถ, จำกัดความเร็วและหยุดรถเมื่อจบหรือผิดพลาด; `PIDController` คำนวณค่าควบคุม |
 | `src/dashboard.py`, `dashboard/index.html` | server ภาพสดและ telemetry; `/api/status` ส่งค่าล่าสุด, `/api/history` ส่งจุดใหม่พร้อมชื่อคอลัมน์, `/video` ส่ง MJPEG |
 | `src/slam.py` | `OccupancyGridSLAM` ฉายลำแสง ToF เดี่ยว โดยใช้ pose, มุม yaw ของ gimbal และ offset จากแกน yaw; `SlamWorker` เลือก ToF channel ตาม config, อ่าน sample timestamp ใกล้กันและทำงานเบื้องหลัง |
-| `src/explorer.py` | `DFSExplorer` หัน gimbal ไปยังเพื่อนบ้าน, รอ angle telemetry และ ToF scan ใหม่ที่ตรงทิศ แล้วใช้ระยะกับแผนที่ตรวจชนก่อนเรียก `ChassisController.move_to()`; จำกัดความเร็ว, ถอยกลับตาม stack และหยุดเมื่อ telemetry/status/ทางกลับไม่ปลอดภัย |
+| `src/explorer.py` | `DFSExplorer` หัน gimbal ดูเพื่อนบ้านครบ 4 ทิศในแต่ละจุด, รอ angle telemetry และ ToF scan ใหม่ที่ตรงทิศ, ตรวจทิศที่จะเดินซ้ำด้วยข้อมูลล่าสุด แล้วใช้ระยะกับแผนที่ตรวจชนก่อนเรียก `ChassisController.move_to()`; จำกัดความเร็ว, ถอยกลับตาม stack และหยุดเมื่อ telemetry/status/ทางกลับไม่ปลอดภัย |
 | `src/run_review.py`, `review/index.html`, `review.py` | อ่าน run จาก CSV/summary, ส่งข้อมูลตัวอย่างให้กราฟ, ดาวน์โหลด CSV เต็ม, แสดงปัญหาบางประเภทและการเล่นย้อนหลัง |
 | `tests/` | ทดสอบ config, PID, logger, controller, dashboard และ review ด้วย fake robot/ข้อมูลชั่วคราว |
 

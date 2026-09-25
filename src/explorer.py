@@ -199,6 +199,17 @@ class DFSExplorer:
             start_xy, end_xy, clearance_m=self.settings["robot_radius_m"]
         )
 
+    def _scan_all_directions(self, node):
+        """Complete a fresh scan of all four neighboring directions before moving."""
+        previous_status = self.status
+        clear = {}
+        for index, delta in enumerate(self.DIRECTIONS, 1):
+            self._set_status(f"scanning_{index}_of_{len(self.DIRECTIONS)}")
+            neighbor = (node[0] + delta[0], node[1] + delta[1])
+            clear[delta] = self._can_step(node, neighbor)
+        self._set_status(previous_status)
+        return clear
+
     def _move(self, destination):
         x, y = self._to_map(destination)
         previous_scan = self.map.latest_scan_timestamp or 0.0
@@ -238,7 +249,9 @@ class DFSExplorer:
                     while len(self.stack) > 1:
                         with self.lock:
                             child, parent = self.stack[-1], self.stack[-2]
-                        if not self._can_step(child, parent):
+                        clear = self._scan_all_directions(child)
+                        back = (parent[0] - child[0], parent[1] - child[1])
+                        if not clear[back] or not self._can_step(child, parent):
                             raise RuntimeError("DFS cannot safely return to the start cell")
                         self._set_status("returning_to_start")
                         self._move(parent)
@@ -247,6 +260,7 @@ class DFSExplorer:
                     self._set_status("node_limit_returned")
                     return self.snapshot()
 
+                clear = self._scan_all_directions(current)
                 next_node = None
                 for delta in self.DIRECTIONS:
                     neighbor = (current[0] + delta[0], current[1] + delta[1])
@@ -254,7 +268,7 @@ class DFSExplorer:
                     if neighbor in self.visited or edge in self.attempted_edges:
                         continue
                     self.attempted_edges.add(edge)
-                    if self._can_step(current, neighbor):
+                    if clear[delta] and self._can_step(current, neighbor):
                         next_node = neighbor
                         break
 
@@ -271,7 +285,8 @@ class DFSExplorer:
                     finished = self.stack.pop()
                     parent = self.stack[-1] if self.stack else None
                 if parent is not None:
-                    if not self._can_step(finished, parent):
+                    back = (parent[0] - finished[0], parent[1] - finished[1])
+                    if not clear[back] or not self._can_step(finished, parent):
                         raise RuntimeError("DFS backtrack path is no longer clear")
                     self._set_status(f"backtracking_to_{parent[0]}_{parent[1]}")
                     self._move(parent)

@@ -278,8 +278,10 @@
       } else document.getElementById("speed").textContent = "— m/s";
       const counts = map.counts || {};
       document.getElementById("map-counts").textContent = `ว่าง ${counts.free_cells ?? 0} · กีดขวาง ${counts.occupied_cells ?? 0} · ไม่รู้จัก ${counts.unknown_cells ?? 0}`;
-      document.getElementById("dfs-status").textContent = map.exploration?.status || "แสดงแผนที่";
-      document.getElementById("map-message").textContent = `scan ${map.scan_count ?? 0} · match ${map.localization_score ?? "—"}`;
+      const dfsStatus = map.exploration?.status || "แสดงแผนที่";
+      const scanProgress = /^scanning_(\d+)_of_(\d+)$/.exec(dfsStatus);
+      document.getElementById("dfs-status").textContent = scanProgress ? `สแกน ${scanProgress[1]}/${scanProgress[2]} ทิศ` : dfsStatus;
+      document.getElementById("map-message").textContent = map.exploration?.error || `scan ${map.scan_count ?? 0} · match ${map.localization_score ?? "—"}`;
       document.getElementById("pose").textContent = map.pose ? `X ${number(map.pose[0])} · Y ${number(map.pose[1])} · Yaw ${number(map.pose[2])}°` : "รอ pose จาก SLAM";
     }
 
