@@ -405,24 +405,25 @@ class ExplorationTests(unittest.TestCase):
         self.assertTrue(gimbal.pending_action.has_succeeded)
         self.assertEqual(len(gimbal.commands), 2)
 
-    def test_dfs_map_check_includes_clearance_margin(self):
+    def test_dfs_uses_fresh_tof_without_map_obstacle_veto(self):
         slam_map = self.make_map()
         logger = FakeLogger()
         logger.set("attitude", (0, 0, 0))
-        gimbal = SimulatedGimbal(slam_map, logger, 2000)
+        gimbal = SimulatedGimbal(slam_map, logger, 1480)
         explorer = DFSExplorer(None, gimbal, logger, slam_map, self.settings)
         explorer.base_pose = (0, 0, 0)
         explorer.slam_worker = FakeSlamWorker()
-        clearances = []
 
-        def inspect_path(start, end, clearance_m):
-            clearances.append(clearance_m)
-            return False
+        def unexpected_map_check(*args, **kwargs):
+            raise AssertionError("DFS must not use occupancy cells to veto a ToF-clear step")
 
-        slam_map.path_has_obstacle = inspect_path
+        slam_map.path_has_obstacle = unexpected_map_check
+        slam_map.contains_world = unexpected_map_check
         self.assertTrue(explorer._can_step((0, 0), (1, 0)))
-        self.assertEqual(clearances, [self.settings["robot_radius_m"] +
-                                      self.settings["clearance_margin_m"]])
+        gimbal.range_provider = 784
+        self.assertFalse(explorer._can_step((0, 0), (1, 0)))
+        gimbal.range_provider = 785
+        self.assertTrue(explorer._can_step((0, 0), (1, 0)))
 
     def test_installed_sdk_moveto_uses_chassis_relative_yaw(self):
         from robomaster.gimbal import COORDINATE_YCPN, GimbalMoveAction

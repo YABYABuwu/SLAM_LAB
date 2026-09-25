@@ -189,16 +189,8 @@ class DFSExplorer:
         )
         required = (self.settings["step_m"] - sensor_offset +
                     self.settings["robot_radius_m"] + self.settings["clearance_margin_m"])
-        if measured_m < required:
-            return False
-        start_xy = (pose[0], pose[1])
-        end_xy = self._to_map(destination)
-        if not self.map.contains_world(*end_xy):
-            return False
-        return not self.map.path_has_obstacle(
-            start_xy, end_xy, clearance_m=(
-                self.settings["robot_radius_m"] + self.settings["clearance_margin_m"]
-            )
+        return measured_m >= required or math.isclose(
+            measured_m, required, rel_tol=0.0, abs_tol=1e-9
         )
 
     def _scan_all_directions(self, node):
@@ -227,7 +219,7 @@ class DFSExplorer:
         raise TimeoutError("no fresh SLAM scan arrived after moving to a cell")
 
     def run(self, slam_worker):
-        """Explore known-clear neighboring cells and backtrack when exhausted."""
+        """Explore ToF-clear neighboring cells and backtrack when exhausted."""
         self.slam_worker = slam_worker
         try:
             self._set_status("starting")
@@ -286,7 +278,7 @@ class DFSExplorer:
                 if self.moves == 0 and len(self.stack) == 1:
                     self._set_status(
                         "no_safe_direction",
-                        "ไม่มีทิศที่ผ่านระยะ ToF และระยะเผื่อรอบหุ่นในแผนที่",
+                        "ไม่มีทิศที่ระยะ ToF ผ่านระยะก้าวและระยะเผื่อรอบหุ่น",
                     )
                     return self.snapshot()
 
