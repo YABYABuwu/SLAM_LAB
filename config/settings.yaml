@@ -79,6 +79,7 @@ exploration:
     yaw_speed_deg_s: 60
     angle_tolerance_deg: 3
     move_timeout_s: 3.0
+    action_timeout_s: 8.0 # เวลารอ SDK แจ้ง action จบเพิ่มเติมหลังเวลาหมุน
     scan_timeout_s: 2.0
   map:
     resolution_m: 0.05

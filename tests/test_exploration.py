@@ -355,7 +355,7 @@ class ExplorationTests(unittest.TestCase):
         self.assertEqual(measured_mm, 2000)
         self.assertEqual(world_yaw, 179)
         self.assertAlmostEqual(gimbal.commands[-1][1], 0)
-        self.assertEqual(gimbal.recenter_calls, 1)
+        self.assertEqual(gimbal.recenter_calls, 0)
 
     def test_gimbal_front_scan_preserves_nonzero_configured_pitch(self):
         settings = copy.deepcopy(self.settings)
@@ -376,12 +376,22 @@ class ExplorationTests(unittest.TestCase):
 
     def test_gimbal_scan_waits_for_sdk_action_before_next_command(self):
         class PendingAction:
-            state = "action_running"
-            has_succeeded = False
+            def __init__(self):
+                self.complete_at = time.monotonic() + 0.56
+                self.completion_confirmed = False
+
+            @property
+            def has_succeeded(self):
+                return time.monotonic() >= self.complete_at
+
+            @property
+            def state(self):
+                return "action_succeeded" if self.has_succeeded else "action_running"
 
             def wait_for_completed(self, timeout=None):
-                self.state = "action_succeeded"
-                self.has_succeeded = True
+                if not self.has_succeeded:
+                    raise AssertionError("SDK completion was awaited before success")
+                self.completion_confirmed = True
                 return True
 
         class BusyGimbal(SimulatedGimbal):
@@ -392,20 +402,50 @@ class ExplorationTests(unittest.TestCase):
                 self.pending_action = PendingAction()
                 return self.pending_action
 
-        slam_map = OccupancyGridSLAM(self.settings)
+        settings = copy.deepcopy(self.settings)
+        settings["gimbal"]["move_timeout_s"] = 0.01
+        settings["gimbal"]["scan_timeout_s"] = 0.01
+        settings["gimbal"]["action_timeout_s"] = 0.3
+        slam_map = OccupancyGridSLAM(settings)
         slam_map.update((0, 0, 0), 2000)
         logger = FakeLogger()
         logger.set("attitude", (0, 0, 0))
         gimbal = BusyGimbal(slam_map, logger, 2000)
-        explorer = DFSExplorer(None, gimbal, logger, slam_map, self.settings)
+        explorer = DFSExplorer(None, gimbal, logger, slam_map, settings)
         explorer.base_pose = (0, 0, 0)
         explorer.slam_worker = FakeSlamWorker()
 
         explorer._scan_for_direction((1, 0))
-        self.assertTrue(gimbal.pending_action.has_succeeded)
+        self.assertTrue(gimbal.pending_action.completion_confirmed)
         explorer._scan_for_direction((0, 1))
-        self.assertTrue(gimbal.pending_action.has_succeeded)
+        self.assertTrue(gimbal.pending_action.completion_confirmed)
         self.assertEqual(len(gimbal.commands), 2)
+
+    def test_gimbal_action_timeout_reports_state_and_angles(self):
+        class StuckAction:
+            state = "action_running"
+            has_succeeded = False
+            _percent = 98
+
+        class StuckGimbal(SimulatedGimbal):
+            def moveto(self, pitch, yaw, pitch_speed, yaw_speed):
+                super().moveto(pitch, yaw, pitch_speed, yaw_speed)
+                return StuckAction()
+
+        settings = copy.deepcopy(self.settings)
+        settings["gimbal"]["move_timeout_s"] = 0.01
+        settings["gimbal"]["action_timeout_s"] = 0.05
+        slam_map = OccupancyGridSLAM(settings)
+        slam_map.update((0, 0, 0), 2000)
+        logger = FakeLogger()
+        logger.set("attitude", (0, 0, 0))
+        gimbal = StuckGimbal(slam_map, logger, 2000)
+        explorer = DFSExplorer(None, gimbal, logger, slam_map, settings)
+        explorer.base_pose = (0, 0, 0)
+        explorer.slam_worker = FakeSlamWorker()
+
+        with self.assertRaisesRegex(TimeoutError, "progress 98%.*relative yaw 0.0"):
+            explorer._scan_for_direction((1, 0))
 
     def test_dfs_updates_wall_grid_and_requires_fresh_clearance(self):
         settings = copy.deepcopy(self.settings)

@@ -152,7 +152,8 @@ def load_config(path=DEFAULT_CONFIG):
             raise ValueError(f"exploration.sensor.{name} must be a finite number")
     if sensor["offset_from_yaw_axis_m"] < 0:
         raise ValueError("exploration.sensor.offset_from_yaw_axis_m must be nonnegative")
-    for name in ("yaw_speed_deg_s", "angle_tolerance_deg", "move_timeout_s", "scan_timeout_s"):
+    for name in ("yaw_speed_deg_s", "angle_tolerance_deg", "move_timeout_s",
+                 "action_timeout_s", "scan_timeout_s"):
         value = gimbal.get(name)
         if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"exploration.gimbal.{name} must be a positive number")

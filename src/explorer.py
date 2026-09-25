@@ -71,9 +71,9 @@ class DFSExplorer:
 
     def _gimbal_sample(self):
         sample = self.logger.get_sample("gimbal", max_age_s=self.settings["sample_timeout_s"])
-        if sample is None or len(sample[0]) < 2:
+        if sample is None or len(sample[0]) < 3:
             raise TimeoutError("gimbal angle data is missing or stale during exploration")
-        return float(sample[0][1]), float(sample[1])
+        return float(sample[0][1]), float(sample[0][2]), float(sample[1])
 
     @staticmethod
     def _command_yaw(target_relative_yaw, current_relative_yaw):
@@ -96,71 +96,91 @@ class DFSExplorer:
         target_yaw = _wrap_degrees(
             world_yaw - body_yaw - float(sensor["yaw_offset_deg"])
         )
-        current_yaw, _ = self._gimbal_sample()
+        current_yaw, _, _ = self._gimbal_sample()
         command_yaw = self._command_yaw(target_yaw, current_yaw)
         request_time = time.time()
         tolerance = self.settings["gimbal"]["angle_tolerance_deg"]
-        use_recenter = (abs(target_yaw) <= tolerance and
-                        abs(self.settings["gimbal"]["pitch_deg"]) <= 0.1)
-        previous_status = self.status
-        self._set_status("recentering" if use_recenter else "scanning")
-        if use_recenter:
+        # recenter() also controls chassis-relative pitch. On the actual robot its
+        # yaw and ToF settled while the SDK kept that action running. An absolute
+        # moveto(yaw=0) centers yaw without invoking the recenter action.
+        if abs(target_yaw) <= tolerance:
             command_yaw = 0.0
-            action = self.gimbal.recenter(
-                pitch_speed=30,
-                yaw_speed=self.settings["gimbal"]["yaw_speed_deg_s"],
-            )
-        else:
-            action = self.gimbal.moveto(
-                pitch=self.settings["gimbal"]["pitch_deg"],
-                yaw=command_yaw,
-                pitch_speed=30,
-                yaw_speed=self.settings["gimbal"]["yaw_speed_deg_s"],
-            )
+        previous_status = self.status
+        self._set_status("scanning")
+        action = self.gimbal.moveto(
+            pitch=self.settings["gimbal"]["pitch_deg"],
+            yaw=command_yaw,
+            pitch_speed=30,
+            yaw_speed=self.settings["gimbal"]["yaw_speed_deg_s"],
+        )
 
         expected_motion_s = abs(command_yaw - current_yaw) / self.settings["gimbal"]["yaw_speed_deg_s"]
-        deadline = time.monotonic() + (
-            max(self.settings["gimbal"]["move_timeout_s"], expected_motion_s + 0.5) +
-            self.settings["gimbal"]["scan_timeout_s"]
-        )
+        action_deadline = time.monotonic() + max(
+            self.settings["gimbal"]["move_timeout_s"], expected_motion_s + 0.5
+        ) + self.settings["gimbal"]["action_timeout_s"]
+        scan_deadline = None
         aligned = False
         measured_yaw = current_yaw
+        measured_pitch = None
         scan_yaw = self.map.latest_gimbal_yaw_deg
-        action_complete = action is None
-        while time.monotonic() < deadline:
+        waiting_for_action = False
+        action_confirmed = action is None
+        while True:
             worker_status = self.slam_worker.status() if self.slam_worker is not None else None
             if worker_status is not None and worker_status["error"]:
                 raise RuntimeError(worker_status["error"])
             action_state = getattr(action, "state", None)
             if action_state in ("action_failed", "action_rejected", "action_exception", "action_aborted"):
-                raise RuntimeError(f"gimbal {('recenter' if use_recenter else 'moveto')} failed: {action_state}")
-            measured_yaw, angle_timestamp = self._gimbal_sample()
+                raise RuntimeError(f"gimbal moveto failed: {action_state}")
+            measured_yaw, measured_pitch, angle_timestamp = self._gimbal_sample()
             aligned = (angle_timestamp > request_time and
-                       abs(_wrap_degrees(target_yaw - measured_yaw)) <= tolerance)
+                       abs(_wrap_degrees(target_yaw - measured_yaw)) <= tolerance and
+                       abs(self.settings["gimbal"]["pitch_deg"] - measured_pitch) <= tolerance)
+
+            action_complete = action is None or getattr(action, "has_succeeded", False)
+            if action_complete and not action_confirmed:
+                # The SDK removes its dispatcher entry before signaling the
+                # completion event. Wait only after state is successful so a
+                # short poll cannot turn a still-running action into exception.
+                wait_for_completed = getattr(action, "wait_for_completed", None)
+                if callable(wait_for_completed) and not wait_for_completed(timeout=0.5):
+                    raise RuntimeError("gimbal SDK reported success but did not release its action")
+                action_confirmed = True
+            now = time.monotonic()
+            if action_confirmed and scan_deadline is None:
+                scan_deadline = now + self.settings["gimbal"]["scan_timeout_s"]
+            if not action_confirmed and now >= action_deadline:
+                raise TimeoutError(
+                    f"gimbal SDK moveto did not complete: state {action_state}, "
+                    f"progress {getattr(action, '_percent', 'unavailable')}%, "
+                    f"relative yaw {measured_yaw:.1f}°, ground pitch {measured_pitch:.1f}°"
+                )
 
             scan_timestamp = self.map.latest_scan_timestamp
             scan_yaw = self.map.latest_gimbal_yaw_deg
             scan_range = self.map.latest_range_mm
-            if (aligned and scan_timestamp is not None and
+            scan_ready = (aligned and scan_timestamp is not None and
                     scan_timestamp > request_time and
                     scan_yaw is not None and
                     abs(_wrap_degrees(target_yaw - scan_yaw)) <= tolerance and
                     scan_range is not None and
-                    time.time() - scan_timestamp <= self.settings["sample_timeout_s"] * 2):
-                if not action_complete:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0 or not action.wait_for_completed(timeout=remaining):
-                        raise TimeoutError("gimbal SDK action did not complete after an aligned ToF scan")
-                    if not action.has_succeeded:
-                        raise RuntimeError(f"gimbal SDK action ended as {action.state}")
-                    action_complete = True
-                    continue
+                    time.time() - scan_timestamp <= self.settings["sample_timeout_s"] * 2)
+            if scan_ready and not action_confirmed and not waiting_for_action:
+                self._set_status("waiting_gimbal_action")
+                waiting_for_action = True
+            elif action_confirmed and waiting_for_action:
+                self._set_status(previous_status)
+                waiting_for_action = False
+            if action_confirmed and scan_ready:
                 self._set_status(previous_status)
                 return float(scan_range), world_yaw
+            if scan_deadline is not None and now >= scan_deadline:
+                break
             time.sleep(0.03)
         raise TimeoutError(
             f"gimbal scan timed out: relative target {target_yaw:.1f}°, "
             f"SDK command {command_yaw:.1f}°, relative actual {measured_yaw:.1f}°, "
+            f"ground pitch {measured_pitch:.1f}°, "
             f"last mapped scan yaw {scan_yaw if scan_yaw is not None else 'none'}°, "
             f"action state {getattr(action, 'state', 'unavailable')}"
         )
