@@ -175,6 +175,7 @@ class ExplorationTests(unittest.TestCase):
         self.assertTrue(api_map["trajectory"])
         self.assertEqual(api_map["sensor_model"]["type"], "single_gimbal_tof")
         self.assertAlmostEqual(api_map["sensor_model"]["offset_from_yaw_axis_m"], 0.075)
+        self.assertAlmostEqual(api_map["sensor_model"]["robot_clearance_m"], 0.20)
         self.assertEqual(len(api_map["data"]), api_map["width"] * api_map["height"])
 
         exported = json.loads(self.request(
@@ -226,6 +227,22 @@ class ExplorationTests(unittest.TestCase):
         self.assertAlmostEqual(lateral_beam[1], 0.075)
         self.assertAlmostEqual(lateral_beam[2], 0.222)
         self.assertAlmostEqual(lateral_beam[3], 0.075)
+
+    def test_short_and_distant_tof_scans_do_not_create_false_walls(self):
+        slam_map = OccupancyGridSLAM(self.settings)
+        self.assertTrue(slam_map.scan_is_valid(83))
+        slam_map.update((0, 0, 0), 83)
+        self.assertEqual(slam_map.latest_range_mm, 83)
+        self.assertEqual(slam_map.to_dict()["counts"]["occupied_cells"], 0)
+
+        self.assertTrue(slam_map.scan_is_valid(20000))
+        slam_map.update((0, 0, 0), 20000)
+        slam_map.update((0, 0, 0), 20000)
+        counts = slam_map.to_dict()["counts"]
+        self.assertGreater(counts["free_cells"], 0)
+        self.assertEqual(counts["occupied_cells"], 0)
+        self.assertFalse(slam_map.scan_is_valid(0))
+        self.assertFalse(slam_map.scan_is_valid(float("inf")))
 
     def test_dfs_visits_nodes_and_returns_to_start(self):
         slam_map = self.make_map()
@@ -306,6 +323,21 @@ class ExplorationTests(unittest.TestCase):
         finally:
             worker.stop()
 
+        close_logger = FakeLogger()
+        close_logger.set("position", (0, 0, 0), timestamp)
+        close_logger.set("attitude", (0, 0, 0), timestamp)
+        close_logger.set("tof", (83, 0, 0, 0), timestamp)
+        close_logger.set("gimbal", (0, 0, 0, 0), timestamp)
+        close_logger.set("status", (0,) * 10, timestamp)
+        close_map = OccupancyGridSLAM(self.settings)
+        close_worker = SlamWorker(close_logger, close_map, self.settings)
+        close_worker.start()
+        try:
+            close_worker.wait_ready(timeout_s=2)
+            self.assertEqual(close_map.latest_range_mm, 83)
+        finally:
+            close_worker.stop()
+
         channel_settings = copy.deepcopy(self.settings)
         channel_settings["sensor"]["tof_channel"] = 2
         channel_logger = FakeLogger()
@@ -324,7 +356,7 @@ class ExplorationTests(unittest.TestCase):
         finally:
             channel_worker.stop()
 
-        for selected_channel, expected_reading in ((0, 83), (1, 0)):
+        for selected_channel, expected_reading in ((1, 0),):
             with self.subTest(channel=selected_channel):
                 invalid_settings = copy.deepcopy(self.settings)
                 invalid_settings["sensor"]["tof_channel"] = selected_channel
@@ -342,7 +374,7 @@ class ExplorationTests(unittest.TestCase):
                     with self.assertRaisesRegex(
                         RuntimeError,
                         f"ToF channel {selected_channel} reported {expected_reading} mm; "
-                        "valid range is 100–10000 mm",
+                        "a finite positive distance is required",
                     ):
                         invalid_worker.wait_ready(timeout_s=2)
                     self.assertTrue(invalid_worker.abort_event.is_set())

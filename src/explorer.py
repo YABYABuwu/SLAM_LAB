@@ -131,7 +131,7 @@ class DFSExplorer:
             measured_m = measured_mm / 1000.0
         except (TypeError, ValueError):
             return False
-        if not math.isfinite(measured_m) or measured_m < self.settings["map"]["min_range_m"]:
+        if not math.isfinite(measured_m) or measured_m <= 0:
             return False
         body_yaw = math.radians(self._current_yaw())
         move_yaw = math.radians(world_yaw)

@@ -136,7 +136,11 @@
       if (sensor?.type === "single_gimbal_tof") {
         document.getElementById("tof-label").textContent = `ToF #${sensor.tof_channel}`;
         const scanYaw = sensor.latest_gimbal_yaw_deg;
-        document.getElementById("tof-model").textContent = `หัว ToF ห่างแกน yaw ${number(sensor.offset_from_yaw_axis_m * 100, 1)} ซม · scan yaw ${scanYaw == null ? "—" : `${number(scanYaw)}°`}`;
+        const tofValue = latest.tof?.[sensor.tof_channel];
+        const insideRobot = tofValue > 0 && sensor.robot_clearance_m != null &&
+          tofValue / 1000 <= sensor.robot_clearance_m;
+        document.getElementById("tof-model").textContent = `หัว ToF ห่างแกน yaw ${number(sensor.offset_from_yaw_axis_m * 100, 1)} ซม · scan yaw ${scanYaw == null ? "—" : `${number(scanYaw)}°`}` +
+          (insideRobot ? " · ระยะอยู่ในเขตกันตัวรถ จึงไม่เพิ่มกำแพงบนแผนที่" : "");
       } else {
         document.getElementById("tof-label").textContent = "ToF";
         document.getElementById("tof-model").textContent = "ToF: ไม่ระบุโมเดลเซนเซอร์";

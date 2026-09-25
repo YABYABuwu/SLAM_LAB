@@ -110,8 +110,7 @@ class OccupancyGridSLAM:
             measured = float(reading_mm) / 1000.0
         except (TypeError, ValueError):
             return None
-        min_range = float(self.settings["map"]["min_range_m"])
-        if not math.isfinite(measured) or measured < min_range or measured > 10.0:
+        if not math.isfinite(measured) or measured <= 0:
             return None
         return measured
 
@@ -119,7 +118,6 @@ class OccupancyGridSLAM:
         x, y, yaw = pose
         yaw_rad = math.radians(yaw)
         cos_yaw, sin_yaw = math.cos(yaw_rad), math.sin(yaw_rad)
-        max_range = float(self.settings["map"]["max_range_m"])
         sensor = self.settings["sensor"]
         measured = self._range_value(reading_mm)
         try:
@@ -128,8 +126,6 @@ class OccupancyGridSLAM:
             return []
         if measured is None or not math.isfinite(gimbal_yaw_deg):
             return []
-        distance = min(measured, max_range)
-        hit = measured < max_range
         beam_yaw = yaw + gimbal_yaw_deg + float(sensor["yaw_offset_deg"])
         beam_rad = math.radians(beam_yaw)
         offset_rad = beam_rad + math.radians(float(sensor["offset_yaw_deg"]))
@@ -139,9 +135,9 @@ class OccupancyGridSLAM:
               offset * math.cos(offset_rad))
         sy = (y + pivot_x * sin_yaw + pivot_y * cos_yaw +
               offset * math.sin(offset_rad))
-        ex = sx + distance * math.cos(beam_rad)
-        ey = sy + distance * math.sin(beam_rad)
-        return [(sx, sy, ex, ey, hit)]
+        ex = sx + measured * math.cos(beam_rad)
+        ey = sy + measured * math.sin(beam_rad)
+        return [(sx, sy, ex, ey, True)]
 
     def scan_is_valid(self, reading_mm, gimbal_yaw_deg=0.0):
         return len(self._beam_geometry((0.0, 0.0, 0.0), reading_mm,
@@ -208,13 +204,35 @@ class OccupancyGridSLAM:
         dx, dy = ex - sx, ey - sy
         length = math.hypot(dx, dy)
         skip = min(float(self.settings["map"]["robot_clearance_m"]), length)
-        if length > 0:
-            sx += dx * skip / length
-            sy += dy * skip / length
-        start = self.world_to_cell(sx, sy)
-        end = self.world_to_cell(ex, ey)
-        if start is None or end is None:
+        if length <= skip:
             return
+        sx += dx * skip / length
+        sy += dy * skip / length
+        start = self.world_to_cell(sx, sy)
+        if start is None or not self._inside(*start):
+            return
+        end = self.world_to_cell(ex, ey)
+        if end is None:
+            return
+        if not self._inside(*end):
+            # Limit work to the finite grid. A hit beyond its edge is not a wall.
+            ray_x, ray_y = ex - sx, ey - sy
+            x_max = self.origin_x + self.width * self.resolution - self.resolution * 1e-6
+            y_max = self.origin_y + self.height * self.resolution - self.resolution * 1e-6
+            travel = 1.0
+            if ray_x > 0:
+                travel = min(travel, (x_max - sx) / ray_x)
+            elif ray_x < 0:
+                travel = min(travel, (self.origin_x - sx) / ray_x)
+            if ray_y > 0:
+                travel = min(travel, (y_max - sy) / ray_y)
+            elif ray_y < 0:
+                travel = min(travel, (self.origin_y - sy) / ray_y)
+            ex, ey = sx + ray_x * travel, sy + ray_y * travel
+            end = self.world_to_cell(ex, ey)
+            hit = False
+            if end is None or not self._inside(*end):
+                return
         cells = list(_line_cells(*start, *end))
         if not cells:
             return
@@ -346,6 +364,7 @@ class OccupancyGridSLAM:
                     "offset_from_yaw_axis_m": float(
                         self.settings["sensor"]["offset_from_yaw_axis_m"]
                     ),
+                    "robot_clearance_m": float(self.settings["map"]["robot_clearance_m"]),
                     "pivot_x_m": float(self.settings["sensor"]["pivot_x_m"]),
                     "pivot_y_m": float(self.settings["sensor"]["pivot_y_m"]),
                     "yaw_offset_deg": float(self.settings["sensor"]["yaw_offset_deg"]),
@@ -548,10 +567,9 @@ class SlamWorker:
                     synchronized = max(timestamps) - min(timestamps) <= self.settings["sample_skew_s"]
                     if synchronized and timestamp != self.last_tof_timestamp:
                         if not self.map.scan_is_valid(reading_mm, gimbal_yaw_deg):
-                            minimum_mm = self.settings["map"]["min_range_m"] * 1000
                             raise ValueError(
                                 f"ToF channel {channel} reported {reading_mm!r} mm; "
-                                f"valid range is {minimum_mm:g}–10000 mm"
+                                "a finite positive distance is required"
                             )
                         pose = (position[0][0], position[0][1], attitude[0][0])
                         self.map.update(pose, reading_mm, timestamp=timestamp,

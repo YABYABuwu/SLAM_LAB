@@ -49,6 +49,8 @@ class TemplateTests(unittest.TestCase):
         self.assertTrue(config["dashboard"]["enabled"])
         self.assertFalse(config["exploration"]["enabled"])
         self.assertEqual(config["exploration"]["sensor"]["tof_channel"], 0)
+        self.assertNotIn("min_range_m", config["exploration"]["map"])
+        self.assertNotIn("max_range_m", config["exploration"]["map"])
 
     def test_sdk_connection_uses_constant_objects(self):
         constants = SimpleNamespace(

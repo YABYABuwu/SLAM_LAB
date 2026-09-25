@@ -112,13 +112,10 @@ def load_config(path=DEFAULT_CONFIG):
     scan_match = exploration.get("scan_match")
     if not isinstance(map_settings, dict) or not isinstance(scan_match, dict):
         raise ValueError("exploration.map and exploration.scan_match must be mappings")
-    for name in ("resolution_m", "width_m", "height_m", "min_range_m",
-                 "max_range_m", "robot_clearance_m"):
+    for name in ("resolution_m", "width_m", "height_m", "robot_clearance_m"):
         value = map_settings.get(name)
         if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"exploration.map.{name} must be a positive number")
-    if map_settings["min_range_m"] >= map_settings["max_range_m"] or map_settings["max_range_m"] > 10:
-        raise ValueError("exploration.map range must satisfy min_range_m < max_range_m <= 10")
     cells_x = round(map_settings["width_m"] / map_settings["resolution_m"])
     cells_y = round(map_settings["height_m"] / map_settings["resolution_m"])
     if cells_x < 2 or cells_y < 2 or cells_x * cells_y > 500000:
