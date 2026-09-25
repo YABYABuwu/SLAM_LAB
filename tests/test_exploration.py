@@ -84,7 +84,7 @@ class SimulatedGimbal:
 
     def recenter(self, pitch_speed, yaw_speed):
         self.recenter_calls += 1
-        self.moveto(pitch=0, yaw=0, pitch_speed=pitch_speed, yaw_speed=yaw_speed)
+        return self.moveto(pitch=0, yaw=0, pitch_speed=pitch_speed, yaw_speed=yaw_speed)
 
 
 class SimulatedChassis:
@@ -342,6 +342,39 @@ class ExplorationTests(unittest.TestCase):
 
         self.assertEqual(gimbal.recenter_calls, 0)
         self.assertAlmostEqual(gimbal.commands[-1][0], 5)
+
+    def test_gimbal_scan_waits_for_sdk_action_before_next_command(self):
+        class PendingAction:
+            state = "action_running"
+            has_succeeded = False
+
+            def wait_for_completed(self, timeout=None):
+                self.state = "action_succeeded"
+                self.has_succeeded = True
+                return True
+
+        class BusyGimbal(SimulatedGimbal):
+            def moveto(self, pitch, yaw, pitch_speed, yaw_speed):
+                if getattr(self, "pending_action", None) is not None and not self.pending_action.has_succeeded:
+                    raise RuntimeError("overlapping gimbal action")
+                super().moveto(pitch, yaw, pitch_speed, yaw_speed)
+                self.pending_action = PendingAction()
+                return self.pending_action
+
+        slam_map = OccupancyGridSLAM(self.settings)
+        slam_map.update((0, 0, 0), 2000)
+        logger = FakeLogger()
+        logger.set("attitude", (0, 0, 0))
+        gimbal = BusyGimbal(slam_map, logger, 2000)
+        explorer = DFSExplorer(None, gimbal, logger, slam_map, self.settings)
+        explorer.base_pose = (0, 0, 0)
+        explorer.slam_worker = FakeSlamWorker()
+
+        explorer._scan_for_direction((1, 0))
+        self.assertTrue(gimbal.pending_action.has_succeeded)
+        explorer._scan_for_direction((0, 1))
+        self.assertTrue(gimbal.pending_action.has_succeeded)
+        self.assertEqual(len(gimbal.commands), 2)
 
     def test_installed_sdk_moveto_uses_chassis_relative_yaw(self):
         from robomaster.gimbal import COORDINATE_YCPN, GimbalMoveAction

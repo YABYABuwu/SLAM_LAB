@@ -37,7 +37,7 @@
 
 SDK Python 3.8 ที่ใช้ในโปรเจคสร้าง `GimbalMoveAction` ของ `moveto()` ด้วย `COORDINATE_YCPN` (`yaw CAR`) จึงรับ yaw เทียบ chassis เช่นเดียวกับ `gimbal` sample ช่องที่ 2 (`yaw_deg`) ไม่ใช้ช่องที่ 4 (`yaw_ground_deg`) คำนวณคำสั่ง เลือกมุมสมมูลใน `[-250°,250°]` ที่ใกล้ relative yaw ปัจจุบันที่สุด โดยเฉพาะทิศหลัง `+180°` กับ `−180°` และเพิ่มเวลาเคลื่อนตามมุมที่ต้องหมุนจริงก่อนรอ scan ใหม่
 
-เมื่อ scan เป้าหมายเป็นกลางและ `gimbal.pitch_deg` เป็นศูนย์ ใช้ `recenter()` ของ SDK แล้วเผยสถานะ `recentering` ผ่าน exploration snapshot เดิม ไม่สร้างโมดูลควบคุมใหม่หรือ subscription เพิ่ม ยังคงรอ telemetry/ToF ใหม่และตรวจทางก่อนสั่ง chassis หาก pitch ไม่เป็นศูนย์ให้ใช้ `moveto()` เพื่อไม่ให้ recenter เปลี่ยน pitch ที่ตั้งไว้
+เมื่อ scan เป้าหมายเป็นกลางและ `gimbal.pitch_deg` เป็นศูนย์ ใช้ `recenter()` ของ SDK แล้วเผยสถานะ `recentering` ผ่าน exploration snapshot เดิม ไม่สร้างโมดูลควบคุมใหม่หรือ subscription เพิ่ม ต้องรอ action object ของ SDK สำเร็จพร้อมกับ telemetry/ToF scan ใหม่ที่ตรงทิศก่อนออกคำสั่ง gimbal ถัดไปหรือสั่ง chassis; ค่า yaw ตรงเป้าอย่างเดียวไม่หมายความว่า action ถูกปลดจาก dispatcher แล้ว หาก pitch ไม่เป็นศูนย์ให้ใช้ `moveto()` เพื่อไม่ให้ recenter เปลี่ยน pitch ที่ตั้งไว้
 
 ToF ไม่มีเกณฑ์ระยะสั้นสุด/ไกลสุดใน config; รับค่าบวก finite ทุกค่า ค่า 0/ค่าผิดรูปแบบยังใช้ไม่ได้ ระยะภายใน `robot_clearance_m` ไม่เขียนทับพื้นที่ใต้หุ่นเป็นกำแพง; ระยะที่ไกลกว่ากริดจะถูกตัดที่ขอบแผนที่และไม่ถือว่าขอบเป็นกำแพง DFS ยังคงต้องตรวจระยะจริงเทียบกับระยะเดิน รัศมีหุ่น และ margin ก่อนเรียก `ChassisController` หน้า dashboard ต้องอธิบายเมื่อระยะใกล้ถูกกันไม่ให้วาดเป็นกำแพง
 

@@ -100,12 +100,12 @@ class DFSExplorer:
         self._set_status("recentering" if use_recenter else "scanning")
         if use_recenter:
             command_yaw = 0.0
-            self.gimbal.recenter(
+            action = self.gimbal.recenter(
                 pitch_speed=30,
                 yaw_speed=self.settings["gimbal"]["yaw_speed_deg_s"],
             )
         else:
-            self.gimbal.moveto(
+            action = self.gimbal.moveto(
                 pitch=self.settings["gimbal"]["pitch_deg"],
                 yaw=command_yaw,
                 pitch_speed=30,
@@ -120,10 +120,14 @@ class DFSExplorer:
         aligned = False
         measured_yaw = current_yaw
         scan_yaw = self.map.latest_gimbal_yaw_deg
+        action_complete = action is None
         while time.monotonic() < deadline:
             worker_status = self.slam_worker.status() if self.slam_worker is not None else None
             if worker_status is not None and worker_status["error"]:
                 raise RuntimeError(worker_status["error"])
+            action_state = getattr(action, "state", None)
+            if action_state in ("action_failed", "action_rejected", "action_exception", "action_aborted"):
+                raise RuntimeError(f"gimbal {('recenter' if use_recenter else 'moveto')} failed: {action_state}")
             measured_yaw, angle_timestamp = self._gimbal_sample()
             aligned = (angle_timestamp > request_time and
                        abs(_wrap_degrees(target_yaw - measured_yaw)) <= tolerance)
@@ -137,13 +141,22 @@ class DFSExplorer:
                     abs(_wrap_degrees(target_yaw - scan_yaw)) <= tolerance and
                     scan_range is not None and
                     time.time() - scan_timestamp <= self.settings["sample_timeout_s"] * 2):
+                if not action_complete:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or not action.wait_for_completed(timeout=remaining):
+                        raise TimeoutError("gimbal SDK action did not complete after an aligned ToF scan")
+                    if not action.has_succeeded:
+                        raise RuntimeError(f"gimbal SDK action ended as {action.state}")
+                    action_complete = True
+                    continue
                 self._set_status(previous_status)
                 return float(scan_range), world_yaw
             time.sleep(0.03)
         raise TimeoutError(
             f"gimbal scan timed out: relative target {target_yaw:.1f}°, "
             f"SDK command {command_yaw:.1f}°, relative actual {measured_yaw:.1f}°, "
-            f"last mapped scan yaw {scan_yaw if scan_yaw is not None else 'none'}°"
+            f"last mapped scan yaw {scan_yaw if scan_yaw is not None else 'none'}°, "
+            f"action state {getattr(action, 'state', 'unavailable')}"
         )
 
     def _can_step(self, node, destination):
