@@ -58,7 +58,7 @@ review.py → RunStore(data/raw) → /api/runs, /api/run, /api/csv → review/in
 | --- | --- | --- |
 | position/attitude | แผนที่, ทิศรถ, ความเร็วประมาณ, พิกัด | แผนที่, เวลาเลือก, ความเร็วประมาณ |
 | gimbal | มุมบนภาพกล้องและทิศบนแผนที่ | มุมและทิศบนแผนที่ |
-| ToF ช่องที่ตั้งใน `exploration.sensor.tof_channel` | ตัวเลขบนภาพกล้องและตำแหน่งหัวเซนเซอร์บนแผนที่ | CSV มีครบสี่ช่องจาก SDK; review เดิมแสดงช่อง 1 เป็นค่าเริ่มต้น |
+| ToF ช่องที่ตั้งใน `exploration.sensor.tof_channel` | ตัวเลขบนภาพกล้องและตำแหน่งหัวเซนเซอร์บนแผนที่ | CSV มีครบสี่ช่องจาก SDK; review แสดงช่อง 0 เป็นค่าเริ่มต้น |
 | status | กราฟทั่วไป | เหตุ picked up/slip/impact/roll over |
 | camera | MJPEG สดใน RAM | ไม่มีภาพย้อนหลัง |
 | mission | ข้อความ `mission_status` ใน RAM | สถานะ/error ระดับ run ใน summary |
@@ -74,7 +74,7 @@ review.py → RunStore(data/raw) → /api/runs, /api/run, /api/csv → review/in
 - Dashboard สดเปิดกล้องเมื่อ `dashboard.enabled: true`; หน้า review ไม่มีภาพย้อนหลัง ค่า `host` เริ่มต้นเป็น localhost และเว็บยังไม่มีระบบล็อกอิน
 - การทดสอบใน `tests/` ไม่ครอบคลุมหุ่นยนต์จริง การปรับ PID สภาพพื้น และการส่งภาพผ่าน Wi-Fi จริง
 - หุ่นยนต์นี้ใช้ ToF เดียวบน gimbal; แต่ละ scan วัดหนึ่งแนวและสะสมเป็น occupancy grid ตาม odometry การ scan matching เดิมต้องมีอย่างน้อยสอง endpoint ใน scan เดียว จึงไม่แก้ drift ในโหมด ToF เดี่ยว และไม่ใช่การ relocalize ทั่วแผนที่
-- `exploration.sensor.tof_channel` เป็นเลขช่อง SDK แบบเริ่มนับจาก 1 (ค่าเริ่มต้น 1); `offset_from_yaw_axis_m` ตั้งเป็น 0.075 m ตามระยะจากแกน yaw ที่ผู้ใช้ให้ และ `offset_yaw_deg: 0` สมมติว่า offset อยู่แนวเดียวกับเลนส์ ส่วน `pivot_x_m/pivot_y_m` ยังตั้งต้นเป็นศูนย์และต้องปรับตามตำแหน่งแกนจริงจากจุดกลางรถก่อนใช้บนฮาร์ดแวร์
+- `exploration.sensor.tof_channel` เป็นดัชนีข้อมูล SDK แบบเริ่มนับจาก 0 (ค่าเริ่มต้น 0); CSV ใหม่ใช้ `tof_0_mm`–`tof_3_mm` ส่วน CSV เก่าที่ใช้ `tof_1_mm`–`tof_4_mm` ยังเปิดใน review ได้ โดยค่าตัวแรกหมายถึงช่อง 0 เหมือนกัน `offset_from_yaw_axis_m` ตั้งเป็น 0.075 m ตามระยะจากแกน yaw ที่ผู้ใช้ให้ และ `offset_yaw_deg: 0` สมมติว่า offset อยู่แนวเดียวกับเลนส์ ส่วน `pivot_x_m/pivot_y_m` ยังตั้งต้นเป็นศูนย์และต้องปรับตามตำแหน่งแกนจริงจากจุดกลางรถก่อนใช้บนฮาร์ดแวร์
 - การอ่าน ToF, gimbal, pose และ status ต้องสดและมี timestamp ใกล้กัน; DFS จะไม่ขับเมื่อมุม gimbal ยังไม่ถึงเป้าหมาย, ไม่มี scan ใหม่ตามทิศ, telemetry ขาด หรือ safety flag ทำงาน
 
 อ้างอิง API ตำแหน่ง/ทิศ/ระยะจาก [RoboMaster Python SDK guide](https://robomaster-dev.readthedocs.io/en/latest/python_sdk/robomaster.html) และสเปกช่วงระยะ/FOV ของ ToF จาก [คู่มือ RoboMaster EP](https://dl.djicdn.com/downloads/ROBOMASTER_EP/20220429UM/RoboMaster_EP_User_Manual_v1.2_EN_1.pdf)

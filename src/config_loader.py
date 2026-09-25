@@ -146,8 +146,8 @@ def load_config(path=DEFAULT_CONFIG):
     if not isinstance(sensor, dict) or not isinstance(gimbal, dict):
         raise ValueError("exploration.sensor and exploration.gimbal must be mappings")
     channel = sensor.get("tof_channel")
-    if type(channel) is not int or channel not in (1, 2, 3, 4):
-        raise ValueError("exploration.sensor.tof_channel must be an integer from 1 to 4")
+    if type(channel) is not int or channel not in (0, 1, 2, 3):
+        raise ValueError("exploration.sensor.tof_channel must be an integer from 0 to 3")
     for name in ("offset_from_yaw_axis_m", "offset_yaw_deg", "pivot_x_m",
                  "pivot_y_m", "yaw_offset_deg"):
         value = sensor.get(name)

@@ -17,7 +17,7 @@ STREAMS = {
     "imu": ("chassis", "sub_imu", "unsub_imu", ("acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z")),
     "esc": ("chassis", "sub_esc", "unsub_esc", ("speed", "angle", "esc_time", "state")),
     "status": ("chassis", "sub_status", "unsub_status", ("static", "up_hill", "down_hill", "on_slope", "picked_up", "slip", "impact_x", "impact_y", "impact_z", "roll_over", "hill_static")),
-    "tof": ("sensor", "sub_distance", "unsub_distance", ("tof_1_mm", "tof_2_mm", "tof_3_mm", "tof_4_mm")),
+    "tof": ("sensor", "sub_distance", "unsub_distance", ("tof_0_mm", "tof_1_mm", "tof_2_mm", "tof_3_mm")),
     "adapter": ("sensor_adaptor", "sub_adapter", "unsub_adapter", tuple(f"io_{n}" for n in range(1, 13)) + tuple(f"adc_{n}" for n in range(1, 13))),
     "battery": ("battery", "sub_battery_info", "unsub_battery_info", ("percent",)),
     "gimbal": ("gimbal", "sub_angle", "unsub_angle", ("pitch_deg", "yaw_deg", "pitch_ground_deg", "yaw_ground_deg")),

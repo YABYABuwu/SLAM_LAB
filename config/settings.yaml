@@ -8,7 +8,7 @@ motion:
   timeout_s: 15               # เวลาสูงสุดต่อ waypoint
   sample_timeout_s: 1.0       # หาก position/attitude เก่ากว่านี้ ให้หยุด
   control_period_s: 0.1       # ระยะเวลาระหว่างคำสั่งความเร็ว
-  max_speed_m_s: 0.35         # เพดานความเร็วรวมของแกน x/y
+  max_speed_m_s: 0.50         # เพดานความเร็วรวมของแกน x/y
   max_turn_deg_s: 45          # เพดานความเร็วหมุน
   hold_heading: true          # yaw: null = รักษามุมเดิมข้าม waypoint ไม่ให้ drift สะสม
   pid:
@@ -37,7 +37,7 @@ logging:
     gimbal:   {enabled: true, save: true, frequency_hz: 5}
 
 dashboard:
-  enabled: false           # true = เปิดหน้าเว็บและกล้องพร้อมกับโปรแกรม
+  enabled: true           # true = เปิดหน้าเว็บและกล้องพร้อมกับโปรแกรม
   host: 127.0.0.1          # เปิดดูจากคอมที่รันโปรแกรมเท่านั้น
   port: 8000               # URL: http://127.0.0.1:8000
   resolution: 360p         # 360p / 540p / 720p; เริ่มต่ำเพื่อประหยัด Wi-Fi
@@ -48,7 +48,7 @@ review:
   host: 127.0.0.1          # หน้าอ่านข้อมูลย้อนหลัง เปิดเฉพาะคอมเครื่องนี้
   port: 8001               # URL: http://127.0.0.1:8001
   max_points_per_stream: 10000 # จำกัดจุดที่ส่งให้เบราว์เซอร์ต่อ CSV; ไฟล์จริงยังครบ
-  close_tof_mm: 200        # แจ้งเหตุการณ์เมื่อ ToF ช่อง 1 ต่ำกว่าระยะนี้ (mm)
+  close_tof_mm: 200        # แจ้งเหตุการณ์เมื่อ ToF ช่อง 0 ต่ำกว่าระยะนี้ (mm)
 
 mission:
   enabled: false          # เริ่มจาก false เพื่อไม่ให้รถวิ่งทันทีเมื่อทดสอบการเชื่อมต่อ
@@ -57,7 +57,7 @@ mission:
     - {x: 0.5, y: 0.5, yaw: null}  # สไลด์ขวาและรักษาทิศเดิม
 
 exploration:
-  enabled: false         # true = ใช้ SLAM + DFS แทน mission waypoints
+  enabled: false        # เปิดหลังสอบเทียบตำแหน่งแกน yaw; true = เริ่ม SLAM + DFS และสั่งรถเดิน
   position_coordinate_system: 1 # ผูกแผนที่กับพิกัดตั้งแต่เปิดหุ่นยนต์ เพื่อให้โหลดแผนที่เดิมได้ในรอบเปิดเครื่องเดียวกัน
   step_m: 0.40            # ระยะห่างระหว่างจุดสำรวจบนกริด DFS
   max_speed_m_s: 0.20     # จำกัดความเร็วขณะสำรวจแยกจาก mission waypoint
@@ -68,7 +68,7 @@ exploration:
   sample_timeout_s: 1.0
   sample_skew_s: 0.25
   sensor:
-    tof_channel: 1         # ช่อง ToF ใน SDK เริ่มนับจาก 1
+    tof_channel: 0         # ดัชนีใน sub_distance เริ่มนับจาก 0 (ช่องที่ใช้จริง)
     offset_from_yaw_axis_m: 0.075 # ระยะจากแกนหมุน yaw ถึงหัว ToF ตามข้อมูลการติดตั้ง
     offset_yaw_deg: 0.0    # ทิศของ offset เทียบแนวเลนส์; 0 = อยู่ตามแนวเลนส์
     pivot_x_m: 0.0         # ตำแหน่งแกน yaw เทียบจุดกึ่งกลางหุ่น; ปรับเมื่อวัดได้

@@ -202,7 +202,9 @@ class ExplorationTests(unittest.TestCase):
 
     def test_gimbal_tof_beam_uses_yaw_axis_offset_and_selected_channel(self):
         settings = copy.deepcopy(self.settings)
-        settings["sensor"]["tof_channel"] = 2
+        zero_based_map = OccupancyGridSLAM(settings)
+        self.assertEqual(zero_based_map._range_value([111, 222, 333, 444]), 0.111)
+        settings["sensor"]["tof_channel"] = 1
         slam_map = OccupancyGridSLAM(settings)
         beam, = slam_map._beam_geometry((1.0, 2.0, 90.0),
                                         [111, 222, 333, 444], -90.0)
@@ -213,6 +215,9 @@ class ExplorationTests(unittest.TestCase):
         self.assertAlmostEqual(ey, 2.0)
         self.assertTrue(hit)
         self.assertTrue(slam_map.scan_is_valid([111, 222, 333, 444], -90))
+
+        settings["sensor"]["tof_channel"] = 3
+        self.assertEqual(OccupancyGridSLAM(settings)._range_value([111, 222, 333, 444]), 0.444)
 
         settings["sensor"]["offset_yaw_deg"] = 90.0
         lateral_map = OccupancyGridSLAM(settings)
@@ -302,7 +307,7 @@ class ExplorationTests(unittest.TestCase):
             worker.stop()
 
         channel_settings = copy.deepcopy(self.settings)
-        channel_settings["sensor"]["tof_channel"] = 3
+        channel_settings["sensor"]["tof_channel"] = 2
         channel_logger = FakeLogger()
         channel_logger.set("position", (0, 0, 0), timestamp)
         channel_logger.set("attitude", (0, 0, 0), timestamp)
@@ -378,7 +383,7 @@ class ExplorationTests(unittest.TestCase):
             with (logger.run_dir / "tof.csv").open(newline="", encoding="utf-8") as file:
                 rows = list(csv.reader(file))
             self.assertEqual(rows[0], [
-                "timestamp", "elapsed_s", "tof_1_mm", "tof_2_mm", "tof_3_mm", "tof_4_mm"
+                "timestamp", "elapsed_s", "tof_0_mm", "tof_1_mm", "tof_2_mm", "tof_3_mm"
             ])
             self.assertEqual(len(rows[1]), 6)
 

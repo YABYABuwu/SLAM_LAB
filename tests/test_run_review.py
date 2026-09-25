@@ -54,7 +54,7 @@ class ReviewTests(unittest.TestCase):
             self.assertIn("dropped 2 rows", messages)
             self.assertIn("no samples for 2.00 s", messages)
             self.assertEqual(messages.count("status: slip detected"), 1)
-            self.assertEqual(messages.count("ToF #1 below 200 mm"), 2)
+            self.assertEqual(messages.count("ToF #0 below 200 mm"), 2)
             self.assertEqual(store.csv_path(run_dir.name, "position"), run_dir / "position.csv")
             with self.assertRaises(ValueError):
                 store.load_run("../outside")

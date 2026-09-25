@@ -100,9 +100,9 @@ class OccupancyGridSLAM:
             self.log_odds[index] = max(-4.0, min(4.0, self.log_odds[index] + delta))
 
     def _range_value(self, reading_mm):
-        """Accept one range or select the configured one-based SDK channel."""
+        """Accept one range or select the configured zero-based SDK channel."""
         if isinstance(reading_mm, (list, tuple)):
-            channel = int(self.settings["sensor"]["tof_channel"]) - 1
+            channel = int(self.settings["sensor"]["tof_channel"])
             if len(reading_mm) <= channel:
                 return None
             reading_mm = reading_mm[channel]
@@ -258,7 +258,7 @@ class OccupancyGridSLAM:
                     except (TypeError, ValueError):
                         self.latest_ranges_mm.append(None)
                 self.latest_range_mm = float(
-                    reading_mm[int(self.settings["sensor"]["tof_channel"]) - 1]
+                    reading_mm[int(self.settings["sensor"]["tof_channel"])]
                 )
             else:
                 self.latest_range_mm = float(reading_mm)
@@ -536,7 +536,7 @@ class SlamWorker:
                     for index in (4, 5, 6, 7, 8, 9):
                         if index < len(status_values) and status_values[index] not in (0, False, None):
                             raise RuntimeError(f"robot safety status flag {index} is active")
-                    channel = int(self.settings["sensor"]["tof_channel"]) - 1
+                    channel = int(self.settings["sensor"]["tof_channel"])
                     if len(values) <= channel:
                         raise ValueError("ToF callback did not include the configured channel")
                     if len(gimbal_values) < 2:

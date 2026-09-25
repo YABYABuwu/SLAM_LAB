@@ -46,7 +46,9 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(pid.compute(2, 0.1), 0.3)
         self.assertEqual(pid.compute(-2, 0.1), -0.3)
         self.assertEqual(angle_error(-179, 179), 2)
-        self.assertFalse(config["dashboard"]["enabled"])
+        self.assertTrue(config["dashboard"]["enabled"])
+        self.assertFalse(config["exploration"]["enabled"])
+        self.assertEqual(config["exploration"]["sensor"]["tof_channel"], 0)
 
     def test_sdk_connection_uses_constant_objects(self):
         constants = SimpleNamespace(

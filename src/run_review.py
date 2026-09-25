@@ -154,7 +154,7 @@ class RunStore:
                         close = isinstance(distance, (int, float)) and 0 < distance < self.close_tof_mm
                         if close and not tof_was_close and len(issues) < 80:
                             issues.append({"level": "warning", "time_s": round(elapsed, 2),
-                                           "message": f"ToF #1 below {self.close_tof_mm} mm ({distance:.0f} mm)"})
+                                           "message": f"ToF #0 below {self.close_tof_mm} mm ({distance:.0f} mm)"})
                         tof_was_close = close
 
                     sample = [row_number, elapsed, values]

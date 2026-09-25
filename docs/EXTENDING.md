@@ -33,7 +33,7 @@
 
 ### ToF เดี่ยวบน gimbal
 
-ใช้ stream `tof` เดิมซึ่งเก็บ SDK ทั้งสี่ช่องไว้ใน CSV/history แล้วเลือก `exploration.sensor.tof_channel` เฉพาะตอนทำ mapping ไม่สร้าง subscription ใหม่ มุมยิงคำนวณจาก yaw รถ + relative yaw ของ gimbal + sensor yaw offset; จุดเริ่มลำแสงคือ pivot ที่ตั้งในกรอบรถ บวก `offset_from_yaw_axis_m` ตาม `offset_yaw_deg` DFS เล็งไปยังช่องที่ต้องตรวจ รอ telemetry มุมและ ToF scan ใหม่ที่ตรงทิศ แล้วจึงประเมินทางก่อนเรียก chassis controller เดิม
+ใช้ stream `tof` เดิมซึ่งเก็บ SDK ทั้งสี่ช่องไว้ใน CSV/history แล้วเลือก `exploration.sensor.tof_channel` ด้วยดัชนี 0–3 เฉพาะตอนทำ mapping ไม่สร้าง subscription ใหม่ CSV ใหม่ใช้ชื่อ `tof_0_mm`–`tof_3_mm`; review ยังอ่าน CSV เก่าที่ใช้ชื่อ 1–4 ได้ มุมยิงคำนวณจาก yaw รถ + relative yaw ของ gimbal + sensor yaw offset; จุดเริ่มลำแสงคือ pivot ที่ตั้งในกรอบรถ บวก `offset_from_yaw_axis_m` ตาม `offset_yaw_deg` DFS เล็งไปยังช่องที่ต้องตรวจ รอ telemetry มุมและ ToF scan ใหม่ที่ตรงทิศ แล้วจึงประเมินทางก่อนเรียก chassis controller เดิม
 
 หน้า dashboard และ `/api/map` ใช้ `sensor_model` metadata ชุดเดียวกันเพื่อแสดง channel, offset และทิศหัว ToF; หากเปลี่ยนช่อง, offset, pivot หรือ yaw alignment ให้ตรวจทั้ง overlay กับ JSON export/import. ค่าเริ่มต้นสมมติว่า offset 7.5 ซม. อยู่แนวเลนส์ (`offset_yaw_deg: 0`). ค่า `pivot_x_m/pivot_y_m` ต้องวัดจากหุ่นจริง เพราะระยะ 7.5 ซม. ที่ทราบอยู่แล้วเริ่มจากแกน gimbal ไม่ได้ระบุตำแหน่งแกนเทียบจุดกลาง chassis.
 
