@@ -17,6 +17,8 @@ def load_config(path=DEFAULT_CONFIG):
     for section in ("connection", "motion", "logging", "dashboard", "review", "mission", "exploration"):
         if not isinstance(config.get(section), dict):
             raise ValueError(f"missing config section: {section}")
+    if config["connection"].get("type") not in ("ap", "sta", "rndis"):
+        raise ValueError("connection.type must be ap, sta or rndis")
 
     dashboard = config["dashboard"]
     if not isinstance(dashboard.get("enabled"), bool):

@@ -7,6 +7,7 @@ from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 
+from main import _sdk_connection_type
 from src.PID import PIDController
 from src.chassis import ChassisController, angle_error
 from src.config_loader import load_config
@@ -46,6 +47,19 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(pid.compute(-2, 0.1), -0.3)
         self.assertEqual(angle_error(-179, 179), 2)
         self.assertFalse(config["dashboard"]["enabled"])
+
+    def test_sdk_connection_uses_constant_objects(self):
+        constants = SimpleNamespace(
+            CONNECTION_WIFI_AP=object(),
+            CONNECTION_WIFI_STA=object(),
+            CONNECTION_USB_RNDIS=object(),
+        )
+        for name, expected in (
+            ("ap", constants.CONNECTION_WIFI_AP),
+            ("sta", constants.CONNECTION_WIFI_STA),
+            ("rndis", constants.CONNECTION_USB_RNDIS),
+        ):
+            self.assertIs(_sdk_connection_type(name, constants), expected)
 
     def test_dashboard_serves_page_and_latest_telemetry(self):
         logger = SimpleNamespace(

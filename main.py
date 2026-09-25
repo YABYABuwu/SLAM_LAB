@@ -11,6 +11,15 @@ from src.logger import SensorLogger
 from src.slam import OccupancyGridSLAM, SlamWorker
 
 
+def _sdk_connection_type(name, sdk_conn):
+    """Pass the SDK's own constants: its connection code compares by identity."""
+    return {
+        "ap": sdk_conn.CONNECTION_WIFI_AP,
+        "sta": sdk_conn.CONNECTION_WIFI_STA,
+        "rndis": sdk_conn.CONNECTION_USB_RNDIS,
+    }[name]
+
+
 def main():
     config = load_config()
     project_dir = Path(__file__).resolve().parent
@@ -29,7 +38,7 @@ def main():
         log_settings["position_cs"] = exploration_settings["position_coordinate_system"]
 
     # Import here so config errors are shown before any SDK connection attempt.
-    from robomaster import robot
+    from robomaster import conn, robot
 
     ep_robot = robot.Robot()
     logger = None
@@ -39,7 +48,9 @@ def main():
     explorer = None
     connected = False
     try:
-        ep_robot.initialize(conn_type=config["connection"]["type"])
+        ep_robot.initialize(conn_type=_sdk_connection_type(
+            config["connection"]["type"], conn
+        ))
         connected = True
         logger = SensorLogger(ep_robot, log_settings)
         logger.start()
