@@ -548,7 +548,11 @@ class SlamWorker:
                     synchronized = max(timestamps) - min(timestamps) <= self.settings["sample_skew_s"]
                     if synchronized and timestamp != self.last_tof_timestamp:
                         if not self.map.scan_is_valid(reading_mm, gimbal_yaw_deg):
-                            raise ValueError("exploration needs a valid range on the configured ToF channel")
+                            minimum_mm = self.settings["map"]["min_range_m"] * 1000
+                            raise ValueError(
+                                f"ToF channel {channel} reported {reading_mm!r} mm; "
+                                f"valid range is {minimum_mm:g}–10000 mm"
+                            )
                         pose = (position[0][0], position[0][1], attitude[0][0])
                         self.map.update(pose, reading_mm, timestamp=timestamp,
                                         gimbal_yaw_deg=gimbal_yaw_deg)

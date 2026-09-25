@@ -324,6 +324,31 @@ class ExplorationTests(unittest.TestCase):
         finally:
             channel_worker.stop()
 
+        for selected_channel, expected_reading in ((0, 83), (1, 0)):
+            with self.subTest(channel=selected_channel):
+                invalid_settings = copy.deepcopy(self.settings)
+                invalid_settings["sensor"]["tof_channel"] = selected_channel
+                invalid_logger = FakeLogger()
+                invalid_logger.set("position", (0, 0, 0), timestamp)
+                invalid_logger.set("attitude", (0, 0, 0), timestamp)
+                invalid_logger.set("tof", (83, 0, 0, 0), timestamp)
+                invalid_logger.set("gimbal", (0, 0, 0, 0), timestamp)
+                invalid_logger.set("status", (0,) * 10, timestamp)
+                invalid_worker = SlamWorker(
+                    invalid_logger, OccupancyGridSLAM(invalid_settings), invalid_settings
+                )
+                invalid_worker.start()
+                try:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        f"ToF channel {selected_channel} reported {expected_reading} mm; "
+                        "valid range is 100–10000 mm",
+                    ):
+                        invalid_worker.wait_ready(timeout_s=2)
+                    self.assertTrue(invalid_worker.abort_event.is_set())
+                finally:
+                    invalid_worker.stop()
+
         unsafe_logger = FakeLogger()
         unsafe_logger.set("position", (0, 0, 0), timestamp)
         unsafe_logger.set("attitude", (0, 0, 0), timestamp)
