@@ -282,7 +282,7 @@ class ExplorationTests(unittest.TestCase):
         self.assertEqual(result["moves"], 0)
         self.assertEqual(chassis.commands, [])
 
-    def test_gimbal_chooses_nearest_startup_frame_yaw_at_half_turn(self):
+    def test_gimbal_chooses_nearest_relative_yaw_at_half_turn(self):
         slam_map = OccupancyGridSLAM(self.settings)
         slam_map.update((0, 0, 0), 2000, gimbal_yaw_deg=90)
         logger = FakeLogger()
@@ -299,7 +299,31 @@ class ExplorationTests(unittest.TestCase):
         self.assertEqual(measured_mm, 2000)
         self.assertEqual(world_yaw, 180)
         self.assertAlmostEqual(gimbal.commands[-1][1], 180)
-        self.assertAlmostEqual(explorer._command_yaw(-30, 0, 10), -20)
+        self.assertAlmostEqual(explorer._command_yaw(-30, 0), -30)
+        self.assertAlmostEqual(explorer._command_yaw(0, -180), 0)
+
+    def test_gimbal_front_scan_ignores_startup_frame_yaw(self):
+        slam_map = OccupancyGridSLAM(self.settings)
+        slam_map.update((0, 0, 0), 2000, gimbal_yaw_deg=-180)
+        logger = FakeLogger()
+        logger.set("attitude", (179, 0, 0))
+        gimbal = SimulatedGimbal(slam_map, logger, 2000)
+        gimbal.yaw = -180
+        logger.set("gimbal", (0, -180, 0, 0))
+        explorer = DFSExplorer(None, gimbal, logger, slam_map, self.settings)
+        explorer.base_pose = (0, 0, 179)
+        explorer.slam_worker = FakeSlamWorker()
+
+        measured_mm, world_yaw = explorer._scan_for_direction((1, 0))
+
+        self.assertEqual(measured_mm, 2000)
+        self.assertEqual(world_yaw, 179)
+        self.assertAlmostEqual(gimbal.commands[-1][1], 0)
+
+    def test_installed_sdk_moveto_uses_chassis_relative_yaw(self):
+        from robomaster.gimbal import COORDINATE_YCPN, GimbalMoveAction
+
+        self.assertEqual(GimbalMoveAction()._coordinate, COORDINATE_YCPN)
 
     def test_dfs_explores_and_backtracks_inside_a_simulated_room(self):
         range_provider = lambda pose, yaw: self.room_range(pose, yaw, half_extent=1.6)
