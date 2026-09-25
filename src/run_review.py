@@ -140,7 +140,7 @@ class RunStore:
 
                     if name_of_stream == "status":
                         for column, value in zip(columns, values):
-                            short_name = column.removeprefix("status_")
+                            short_name = column[7:] if column.startswith("status_") else column
                             if short_name not in STATUS_FLAGS:
                                 continue
                             active = value not in (None, 0, False)

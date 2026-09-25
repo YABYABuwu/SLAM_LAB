@@ -6,13 +6,15 @@
 
 ## เริ่มใช้งาน
 
-ใช้ Python 3.9+ เชื่อมต่อคอมพิวเตอร์กับ RoboMaster EP ก่อน แล้วรันจากโฟลเดอร์ `TemplateProject`:
+ใช้ Python 3.8 ซึ่งติดตั้ง `robomaster` ได้ในเครื่องที่ใช้ เชื่อมต่อคอมพิวเตอร์กับ RoboMaster EP แล้วรันจากโฟลเดอร์โปรเจค:
 
 ```bash
-python -m venv .venv
+python3.8 -m venv .venv
+# Windows: py -3.8 -m venv .venv
 # Linux/macOS: source .venv/bin/activate
 # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+python -c "import sys, robomaster; assert sys.version_info[:2] == (3, 8)"
 python main.py
 ```
 
