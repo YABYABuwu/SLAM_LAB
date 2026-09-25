@@ -70,6 +70,17 @@ class ReviewTests(unittest.TestCase):
             self.assertEqual(result["summary"], {})
             self.assertEqual(result["streams"]["battery"]["samples"][0][2], [88.0])
 
+    def test_no_safe_direction_is_reported_in_review(self):
+        with tempfile.TemporaryDirectory() as temp:
+            run_dir = Path(temp) / "blocked"
+            run_dir.mkdir()
+            (run_dir / "run_summary.json").write_text(json.dumps({
+                "status": "no_safe_direction", "error": "ไม่มีทิศที่ผ่านระยะเผื่อ",
+            }), encoding="utf-8")
+            result = RunStore(temp).load_run("blocked")
+            self.assertEqual(result["issues"][0]["level"], "warning")
+            self.assertIn("ไม่มีทิศ", result["issues"][0]["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

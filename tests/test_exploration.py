@@ -311,7 +311,7 @@ class ExplorationTests(unittest.TestCase):
 
         result = explorer.run(FakeSlamWorker())
 
-        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["status"], "no_safe_direction")
         self.assertEqual(result["visited"], [[0, 0]])
         self.assertEqual(result["moves"], 0)
         self.assertEqual(chassis.commands, [])
@@ -404,6 +404,25 @@ class ExplorationTests(unittest.TestCase):
         explorer._scan_for_direction((0, 1))
         self.assertTrue(gimbal.pending_action.has_succeeded)
         self.assertEqual(len(gimbal.commands), 2)
+
+    def test_dfs_map_check_includes_clearance_margin(self):
+        slam_map = self.make_map()
+        logger = FakeLogger()
+        logger.set("attitude", (0, 0, 0))
+        gimbal = SimulatedGimbal(slam_map, logger, 2000)
+        explorer = DFSExplorer(None, gimbal, logger, slam_map, self.settings)
+        explorer.base_pose = (0, 0, 0)
+        explorer.slam_worker = FakeSlamWorker()
+        clearances = []
+
+        def inspect_path(start, end, clearance_m):
+            clearances.append(clearance_m)
+            return False
+
+        slam_map.path_has_obstacle = inspect_path
+        self.assertTrue(explorer._can_step((0, 0), (1, 0)))
+        self.assertEqual(clearances, [self.settings["robot_radius_m"] +
+                                      self.settings["clearance_margin_m"]])
 
     def test_installed_sdk_moveto_uses_chassis_relative_yaw(self):
         from robomaster.gimbal import COORDINATE_YCPN, GimbalMoveAction

@@ -196,7 +196,9 @@ class DFSExplorer:
         if not self.map.contains_world(*end_xy):
             return False
         return not self.map.path_has_obstacle(
-            start_xy, end_xy, clearance_m=self.settings["robot_radius_m"]
+            start_xy, end_xy, clearance_m=(
+                self.settings["robot_radius_m"] + self.settings["clearance_margin_m"]
+            )
         )
 
     def _scan_all_directions(self, node):
@@ -280,6 +282,13 @@ class DFSExplorer:
                         self.visited.add(next_node)
                     self._set_status("exploring")
                     continue
+
+                if self.moves == 0 and len(self.stack) == 1:
+                    self._set_status(
+                        "no_safe_direction",
+                        "ไม่มีทิศที่ผ่านระยะ ToF และระยะเผื่อรอบหุ่นในแผนที่",
+                    )
+                    return self.snapshot()
 
                 with self.lock:
                     finished = self.stack.pop()

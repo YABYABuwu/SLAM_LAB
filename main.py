@@ -88,7 +88,11 @@ def main():
             slam_worker.stop(map_settings["save_path"])
             if dashboard is not None:
                 dashboard.mission_status = f"Exploration {explorer.status}"
-            logger.run_status = "completed"
+            if explorer.status == "no_safe_direction":
+                logger.run_status = explorer.status
+                logger.run_error = explorer.error
+            else:
+                logger.run_status = "completed"
         elif config["mission"]["enabled"]:
             logger.wait_for("position", config["motion"]["sample_timeout_s"])
             logger.wait_for("attitude", config["motion"]["sample_timeout_s"])

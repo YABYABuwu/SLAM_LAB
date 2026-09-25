@@ -83,6 +83,9 @@ class RunStore:
         if summary.get("status") in ("failed", "interrupted"):
             issues.append({"level": "error", "time_s": None,
                            "message": f"Run {summary['status']}: {summary.get('error') or 'stopped early'}"})
+        elif summary.get("status") == "no_safe_direction":
+            issues.append({"level": "warning", "time_s": None,
+                           "message": summary.get("error") or "No safe direction found for exploration"})
         if summary.get("dropped_csv_rows", 0):
             issues.append({"level": "warning", "time_s": None,
                            "message": f"CSV queue dropped {summary['dropped_csv_rows']} rows"})
