@@ -77,7 +77,7 @@
         <div class="map-wrap">
           <canvas id="map" aria-label="เส้นทาง ตำแหน่ง และทิศหุ่นยนต์"></canvas>
           <div class="map-legend"><span class="key" style="--key:#122c39">พื้นที่ว่าง</span><span class="key" style="--key:#ffb868">สิ่งกีดขวาง</span><span class="key" style="--key:#69d9ff">เส้นทาง</span></div>
-          <div class="map-info"><div>DFS&nbsp; <strong id="dfs-status">ปิด</strong></div><div id="map-counts">รอข้อมูลแผนที่</div><div id="pose">X — · Y — · Yaw —</div><div>ความเร็ว&nbsp; <strong id="speed">— m/s</strong></div><div>Gimbal&nbsp; <span id="gimbal-map">—</span></div><div>แผนที่: +X หน้า · +Y ขวา · yaw + ไปทาง +Y</div><div id="tof-model">ToF: —</div><div id="map-message"></div></div>
+          <div class="map-info"><div>DFS&nbsp; <strong id="dfs-status">ปิด</strong></div><div id="map-counts">รอข้อมูลแผนที่</div><div id="pose">X — · Y — · Yaw —</div><div>ความเร็ว&nbsp; <strong id="speed">— m/s</strong></div><div>Gimbal&nbsp; <span id="gimbal-map">—</span></div><div>ทิศแผนที่: ↑ +X เหนือ · ↓ −X ใต้ · → +Y ตะวันออก</div><div id="tof-model">ToF: —</div><div id="map-message"></div></div>
         </div>
       </section>
     </div>
@@ -167,7 +167,7 @@
       const spanX = Math.max(1.5, Math.max(...xs) - Math.min(...xs));
       const spanY = Math.max(1.5, Math.max(...ys) - Math.min(...ys));
       const scale = Math.min((h - 70) / spanX, (w - 70) / spanY);
-      const project = (x, y) => [w / 2 - (y - midY) * scale, h / 2 - (x - midX) * scale];
+      const project = (x, y) => [w / 2 + (y - midY) * scale, h / 2 - (x - midX) * scale];
 
       const origin = project(0, 0);
       ctx.fillStyle = "#94aab9"; ctx.beginPath(); ctx.arc(...origin, 3, 0, Math.PI * 2); ctx.fill();
@@ -182,7 +182,7 @@
       const end = points[points.length - 1];
       const [cx, cy] = project(Number(end[2][0]), Number(end[2][1]));
       const yaw = Number(latest.attitude?.[0] || 0) * Math.PI / 180;
-      const forward = [-Math.sin(yaw), -Math.cos(yaw)];
+      const forward = [Math.sin(yaw), -Math.cos(yaw)];
       const side = [-forward[1], forward[0]];
       ctx.beginPath();
       ctx.moveTo(cx + forward[0] * 18, cy + forward[1] * 18);
@@ -192,7 +192,7 @@
       if (latest.gimbal) {
         const gimbalYaw = yaw + Number(latest.gimbal[1]) * Math.PI / 180;
         ctx.beginPath(); ctx.moveTo(cx, cy);
-        ctx.lineTo(cx - Math.sin(gimbalYaw) * 34, cy - Math.cos(gimbalYaw) * 34);
+        ctx.lineTo(cx + Math.sin(gimbalYaw) * 34, cy - Math.cos(gimbalYaw) * 34);
         ctx.strokeStyle = "#8df3d3"; ctx.lineWidth = 3; ctx.stroke();
       }
 
@@ -211,9 +211,9 @@
     function drawSlamMap(ctx, w, h, map) {
       const resolution = Number(map.resolution_m);
       const [originX, originY] = map.origin || [0, 0];
-      const worldW = map.width * resolution, worldH = map.height * resolution;
-      const scale = Math.min((w - 28) / worldW, (h - 28) / worldH);
-      const drawnW = worldW * scale, drawnH = worldH * scale;
+      const worldX = map.width * resolution, worldY = map.height * resolution;
+      const scale = Math.min((w - 28) / worldY, (h - 28) / worldX);
+      const drawnW = worldY * scale, drawnH = worldX * scale;
       const left = (w - drawnW) / 2, bottom = (h + drawnH) / 2;
       const cell = Math.max(1, resolution * scale);
       ctx.fillStyle = "#09141d"; ctx.fillRect(left, bottom - drawnH, drawnW, drawnH);
@@ -222,17 +222,17 @@
           const value = map.data[iy * map.width + ix];
           if (value < 0) continue;
           ctx.fillStyle = value >= 65 ? "#ffb868" : value <= 19 ? "#173746" : "#677b83";
-          ctx.fillRect(left + ix * cell, bottom - (iy + 1) * cell, cell + .3, cell + .3);
+          ctx.fillRect(left + iy * cell, bottom - (ix + 1) * cell, cell + .3, cell + .3);
         }
       }
       ctx.strokeStyle = "#29404f"; ctx.lineWidth = 1;
-      for (let meter = 0; meter <= Math.max(worldW, worldH); meter++) {
+      for (let meter = 0; meter <= Math.max(worldX, worldY); meter++) {
         const x = left + meter * scale, y = bottom - meter * scale;
-        if (meter <= worldW) { ctx.beginPath(); ctx.moveTo(x, bottom - drawnH); ctx.lineTo(x, bottom); ctx.stroke(); }
-        if (meter <= worldH) { ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(left + drawnW, y); ctx.stroke(); }
+        if (meter <= worldY) { ctx.beginPath(); ctx.moveTo(x, bottom - drawnH); ctx.lineTo(x, bottom); ctx.stroke(); }
+        if (meter <= worldX) { ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(left + drawnW, y); ctx.stroke(); }
       }
-      const project = point => [left + (point[0] - originX) * scale,
-        bottom - (point[1] - originY) * scale];
+      const project = point => [left + (point[1] - originY) * scale,
+        bottom - (point[0] - originX) * scale];
       const route = map.trajectory || [];
       if (route.length) {
         ctx.beginPath();
@@ -246,7 +246,7 @@
       }
       if (map.pose) {
         const [cx, cy] = project(map.pose), yaw = Number(map.pose[2]) * Math.PI / 180;
-        const forward = [Math.cos(yaw), -Math.sin(yaw)], side = [-forward[1], forward[0]];
+        const forward = [Math.sin(yaw), -Math.cos(yaw)], side = [-forward[1], forward[0]];
         ctx.beginPath(); ctx.moveTo(cx + forward[0] * 11, cy + forward[1] * 11);
         ctx.lineTo(cx - forward[0] * 7 + side[0] * 6, cy - forward[1] * 7 + side[1] * 6);
         ctx.lineTo(cx - forward[0] * 7 - side[0] * 6, cy - forward[1] * 7 - side[1] * 6);
@@ -262,7 +262,7 @@
           const sensorWorldY = map.pose[1] + pivotX * Math.sin(yaw) + pivotY * Math.cos(yaw) + offset * Math.sin(offsetDirection);
           const [sensorX, sensorY] = project(sensorWorldX, sensorWorldY);
           ctx.beginPath(); ctx.moveTo(sensorX, sensorY);
-          ctx.lineTo(sensorX + Math.cos(direction) * 20, sensorY - Math.sin(direction) * 20);
+          ctx.lineTo(sensorX + Math.sin(direction) * 20, sensorY - Math.cos(direction) * 20);
           ctx.strokeStyle = "#8df3d3"; ctx.lineWidth = 3; ctx.stroke();
           document.getElementById("gimbal-map").textContent = `yaw ${number(gimbal[1])}° · pitch ${number(gimbal[0])}°`;
         } else document.getElementById("gimbal-map").textContent = "—";
