@@ -83,6 +83,7 @@
       </section>
       <section class="card"><div class="head"><h2>ค่าที่เวลาที่เลือก</h2><span class="muted" id="sample-time">—</span></div><div class="values" id="values"></div></section>
       <section class="card"><div class="head"><h2>จุดที่ควรตรวจ</h2><span class="muted">คลิกเพื่อกระโดดไปช่วงนั้น</span></div><div class="issues" id="issues"><p class="muted">เลือก run ก่อน</p></div></section>
+      <section class="card"><div class="head"><h2>กำแพงแต่ละช่อง</h2><span class="muted">สถานะสุดท้ายของรัน ไม่เปลี่ยนตามเวลา</span></div><div id="wall-grid-review" style="padding:15px;max-height:300px;overflow:auto"></div></section>
       <section class="card"><div class="head"><h2>ภาพย้อนหลัง</h2></div><p class="muted" style="padding:15px">เวอร์ชันนี้บันทึกเฉพาะข้อมูลเซนเซอร์และตำแหน่ง ยังไม่มีไฟล์ภาพย้อนหลัง</p></section>
     </div>
     <section class="card"><div class="head"><h2>กราฟข้อมูลที่บันทึก</h2><span class="muted">ชี้กราฟเพื่อเลื่อนเวลาทุกส่วนพร้อมกัน</span></div><div class="graphs" id="graphs"><p class="muted" id="empty">ยังไม่มี run ที่บันทึกไว้</p></div></section>
@@ -353,6 +354,24 @@
       document.getElementById("stream-count").textContent = Object.keys(run.streams).length;
       document.getElementById("dropped").textContent = run.summary.dropped_csv_rows ?? "—";
       document.getElementById("seek").max = Math.max(.01, run.duration_s);
+      const wallPanel=document.getElementById("wall-grid-review"); wallPanel.replaceChildren();
+      const wallGrid=run.summary.exploration?.cell_grid;
+      if (wallGrid?.cells?.length) {
+        const table=document.createElement("table"); table.style.width="100%";
+        const header=document.createElement("tr");
+        ["ช่อง", "หน้า +X", "ซ้าย −Y", "หลัง −X", "ขวา +Y"].forEach(label=>{const th=document.createElement("th");th.textContent=label;header.append(th);});table.append(header);
+        for (const cell of wallGrid.cells) {
+          const row=document.createElement("tr");
+          const name=document.createElement("td"); name.textContent=cell.index.join(","); row.append(name);
+          for (const side of ["x+","y-","x-","y+"]) {
+            const td=document.createElement("td"), info=cell.sides[side];
+            td.textContent=info.state==="wall"?"กำแพง":info.state==="open"?(info.clearance_ok===false?"เปิด / ระยะไม่พอ":"เปิด"):"ยังไม่รู้";
+            row.append(td);
+          }
+          table.append(row);
+        }
+        wallPanel.append(table);
+      } else wallPanel.textContent="รันนี้ไม่มีข้อมูลกริดกำแพง";
       buildCharts(); showIssues();
       setTime(startAtEnd || followEnd ? run.duration_s : refresh ? savedTime : 0);
     }

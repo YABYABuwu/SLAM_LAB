@@ -137,6 +137,8 @@ def main():
                 if slam_worker is not None:
                     slam_worker.stop(map_settings["save_path"])
             finally:
+                if logger is not None and explorer is not None:
+                    logger.exploration_state = explorer.snapshot()
                 try:
                     if dashboard is not None:
                         dashboard.stop()

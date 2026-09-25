@@ -32,7 +32,7 @@ review.py → RunStore(data/raw) → /api/runs, /api/run, /api/csv → review/in
 | `src/logger.py` | ตาราง `STREAMS` ผูกชื่อ stream กับ SDK module/subscribe/unsubscribe/ชื่อคอลัมน์; callback เก็บค่าล่าสุดและ history; writer thread เขียน CSV เฉพาะ stream ที่ `save: true` |
 | `src/chassis.py`, `src/PID.py` | `move_to` ใช้ position/attitude ที่ยังสด, แปลงความเร็วจากกรอบโลกเป็นกรอบรถ, จำกัดความเร็วและหยุดรถเมื่อจบหรือผิดพลาด; `PIDController` คำนวณค่าควบคุม |
 | `src/dashboard.py`, `dashboard/index.html` | server ภาพสดและ telemetry; `/api/status` ส่งค่าล่าสุด, `/api/history` ส่งจุดใหม่พร้อมชื่อคอลัมน์, `/video` ส่ง MJPEG |
-| `src/slam.py` | `OccupancyGridSLAM` ฉายลำแสง ToF เดี่ยว โดยใช้ pose, มุม yaw ของ gimbal และ offset จากแกน yaw; `SlamWorker` เลือก ToF channel ตาม config, อ่าน sample timestamp ใกล้กันและทำงานเบื้องหลัง |
+| `src/slam.py` | `CellWallGrid` เก็บ occupancy ของขอบช่องที่ใช้ร่วมกัน; `OccupancyGridSLAM` ฉายลำแสง ToF เดี่ยว โดยใช้ pose, มุม yaw ของ gimbal และ offset จากแกน yaw; `SlamWorker` เลือก ToF channel ตาม config, อ่าน sample timestamp ใกล้กันและทำงานเบื้องหลัง |
 | `src/explorer.py` | `DFSExplorer` หัน gimbal ดูเพื่อนบ้านครบ 4 ทิศในแต่ละจุด, รอ angle telemetry, action สำเร็จ และ ToF scan ใหม่ที่ตรงทิศ, ตรวจทิศที่จะเดินซ้ำด้วยข้อมูลล่าสุด แล้วใช้ระยะ ToF รวมขนาดหุ่นและ margin ก่อนเรียก `ChassisController.move_to()`; จำกัดความเร็ว, ถอยกลับตาม stack และหยุดเมื่อ telemetry/status/ทางกลับไม่ผ่านเกณฑ์ |
 | `src/run_review.py`, `review/index.html`, `review.py` | อ่าน run จาก CSV/summary, ส่งข้อมูลตัวอย่างให้กราฟ, ดาวน์โหลด CSV เต็ม, แสดงปัญหาบางประเภทและการเล่นย้อนหลัง |
 | `tests/` | ทดสอบ config, PID, logger, controller, dashboard และ review ด้วย fake robot/ข้อมูลชั่วคราว |
@@ -63,7 +63,7 @@ review.py → RunStore(data/raw) → /api/runs, /api/run, /api/csv → review/in
 | status | กราฟทั่วไป | เหตุ picked up/slip/impact/roll over |
 | camera | MJPEG สดใน RAM | ไม่มีภาพย้อนหลัง |
 | mission | ข้อความ `mission_status` ใน RAM | สถานะ/error ระดับ run ใน summary |
-| exploration | occupancy grid, trajectory, DFS status/visited cells | อยู่ในไฟล์ export แผนที่ ไม่ได้เพิ่มข้อมูล map ลง CSV review |
+| exploration | กริดกำแพงสี่ด้าน, occupancy ละเอียด, trajectory, DFS status | กริดสุดท้ายใน summary และตารางกำแพงใน review; JSON export มีทั้งสองกริด |
 
 ดังนั้นการมีกราฟใหม่ไม่ได้ยืนยันว่า dashboard สื่อความหมายของระบบใหม่ครบ โดยเฉพาะสถานะ mission, ความปลอดภัย, หน่วย และเหตุผิดปกติ
 
@@ -78,7 +78,7 @@ review.py → RunStore(data/raw) → /api/runs, /api/run, /api/csv → review/in
 - `exploration.sensor.tof_channel` เป็นดัชนีข้อมูล SDK แบบเริ่มนับจาก 0 (ค่าเริ่มต้น 0); CSV ใหม่ใช้ `tof_0_mm`–`tof_3_mm` ส่วน CSV เก่าที่ใช้ `tof_1_mm`–`tof_4_mm` ยังเปิดใน review ได้ โดยค่าตัวแรกหมายถึงช่อง 0 เหมือนกัน `offset_from_yaw_axis_m` ตั้งเป็น 0.075 m ตามระยะจากแกน yaw ที่ผู้ใช้ให้ และ `offset_yaw_deg: 0` สมมติว่า offset อยู่แนวเดียวกับเลนส์ ส่วน `pivot_x_m/pivot_y_m` ยังตั้งต้นเป็นศูนย์และต้องปรับตามตำแหน่งแกนจริงจากจุดกลางรถก่อนใช้บนฮาร์ดแวร์
 - SLAM ไม่กำหนดระยะ ToF สั้นสุด/ไกลสุด; รับค่าบวกที่เป็นตัวเลข finite ค่าระยะใกล้ใน `robot_clearance_m` ยังเป็น scan ที่ใช้ได้ แต่ไม่เพิ่ม occupancy ใต้ตัวรถ และปลายลำแสงที่อยู่นอกกริดจะถูกตัดที่ขอบกริดโดยไม่เพิ่มผนังเทียม Dashboard ระบุเมื่อค่าล่าสุดอยู่ในเขตกันตัวรถ ขณะที่ DFS ยังคำนวณระยะเผื่อจากขนาดตัวรถก่อนสั่งเดิน
 - การอ่าน ToF, gimbal, pose และ status ต้องสดและมี timestamp ใกล้กัน; DFS จะไม่ขับเมื่อมุม gimbal ยังไม่ถึงเป้าหมาย, ไม่มี scan ใหม่ตามทิศ, telemetry ขาด หรือ safety flag ทำงาน
-- DFS ใช้แผนที่เพื่อแสดงผลและ export โดยไม่ใช้ occupancy grid ปฏิเสธคำสั่งเดิน การอนุญาตเดินหรือถอยกลับใช้ ToF ใหม่หลัง gimbal หันถึงทิศและ SDK action จบ แล้วเทียบระยะกับ `step_m - sensor_offset + robot_radius_m + clearance_margin_m` หากไม่มีทิศผ่านตั้งแต่จุดเริ่มจะแสดง `no_safe_direction` บน dashboard และ review
+- DFS ใช้ `CellWallGrid` ใน `src/slam.py` เก็บขอบสี่ด้านของช่องและระยะเผื่อที่วัดล่าสุด เลือกข้ามเฉพาะขอบ `open` ที่ `clearance_ok` แล้วสแกนยืนยันทิศนั้นใหม่ แผนที่ละเอียดคงไว้สำหรับดูและ export แต่ไม่ใช้จุด occupancy ระหว่างหมุนหัวมาสร้างกำแพงกริด รายละเอียด schema และการฉายรังสีอยู่ใน [WALL_GRID.md](WALL_GRID.md)
 - SDK Python 3.8 ที่ติดตั้งกำหนด `GimbalMoveAction` ของ `moveto()` เป็น `COORDINATE_YCPN` (`yaw CAR`) ดังนั้น yaw คำสั่งเทียบ chassis เช่นเดียวกับช่อง `yaw_deg` ใน `sub_angle` ส่วน `yaw_ground_deg` เป็นอีกกรอบที่ห้ามนำมาบวกเข้ากับคำสั่ง DFS เลือกมุมสมมูลในช่วง SDK `[-250°,250°]` ที่ใกล้ relative yaw ปัจจุบันสุด และตรวจมุม scan ในกรอบเดียวกันก่อนอนุญาตให้เดิน
 - DFS ใช้ `gimbal.recenter()` เมื่อเป้าหมาย yaw อยู่ใน tolerance ของศูนย์และ pitch ที่ตั้งเป็นศูนย์; สถานะ `recentering` ปรากฏใน dashboard ผ่าน exploration snapshot จากนั้นต้องได้ gimbal telemetry และ ToF scan ใหม่ที่ตรงทิศ **และ** action ของ SDK ต้องรายงานว่าสำเร็จก่อนตรวจทางเดินหรือออกคำสั่ง gimbal ถัดไป สำหรับ pitch อื่นหรือทิศอื่นใช้ `moveto()` โดยใช้กฎรอ action เดียวกัน
 

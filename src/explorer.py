@@ -4,11 +4,11 @@ import math
 import threading
 import time
 
-from src.slam import _wrap_degrees
+from src.slam import CellWallGrid, _wrap_degrees
 
 
 class DFSExplorer:
-    """Visit grid-cell centers in depth-first order using known-clear ToF rays."""
+    """Traverse shared open cell borders observed with the gimbal ToF."""
 
     DIRECTIONS = ((1, 0), (0, -1), (-1, 0), (0, 1))
 
@@ -22,9 +22,14 @@ class DFSExplorer:
         self.error = None
         self.visited = set()
         self.stack = []
-        self.attempted_edges = set()
         self.moves = 0
         self.base_pose = None
+        self.current_cell = (0, 0)
+        self.wall_grid = CellWallGrid(
+            settings["step_m"], min(1000, math.ceil(math.hypot(
+                settings["map"]["width_m"], settings["map"]["height_m"]
+            ) / settings["step_m"]) + 1)
+        )
         self.slam_worker = None
         self.lock = threading.RLock()
 
@@ -41,6 +46,7 @@ class DFSExplorer:
                 if self.base_pose is not None else [],
                 "moves": self.moves,
                 "max_nodes": self.settings["max_nodes"],
+                "cell_grid": self.wall_grid.snapshot(self.base_pose, self.current_cell),
             }
 
     def _set_status(self, status, error=None):
@@ -160,13 +166,15 @@ class DFSExplorer:
         )
 
     def _can_step(self, node, destination):
+        delta = (destination[0] - node[0], destination[1] - node[1])
+        with self.lock:
+            self.wall_grid.checks.pop((tuple(node), delta), None)
         worker_status = self.slam_worker.status() if self.slam_worker is not None else None
         if worker_status is not None and worker_status["error"]:
             raise RuntimeError(worker_status["error"])
         pose = self.map.pose
         if pose is None:
             return False
-        delta = (destination[0] - node[0], destination[1] - node[1])
         measured_mm, world_yaw = self._scan_for_direction(delta)
         try:
             measured_m = measured_mm / 1000.0
@@ -187,20 +195,30 @@ class DFSExplorer:
             pivot_projection + sensor_config["offset_from_yaw_axis_m"] *
             math.cos(math.radians(sensor_config["offset_yaw_deg"]))
         )
-        required = (self.settings["step_m"] - sensor_offset +
+        pose = self.map.pose
+        center = self._to_map(node)
+        pose_along = ((pose[0] - center[0]) * math.cos(move_yaw) +
+                      (pose[1] - center[1]) * math.sin(move_yaw))
+        required = (self.settings["step_m"] - pose_along - sensor_offset +
                     self.settings["robot_radius_m"] + self.settings["clearance_margin_m"])
-        return measured_m >= required or math.isclose(
-            measured_m, required, rel_tol=0.0, abs_tol=1e-9
-        )
+        with self.lock:
+            self.wall_grid.observe(
+                node, delta, measured_m + sensor_offset + pose_along,
+                measured_mm, required, self.map.latest_scan_timestamp,
+            )
+            allowed = self.wall_grid.can_cross(node, delta)
+        self.map.set_exploration_state(self.snapshot())
+        return allowed
 
     def _scan_all_directions(self, node):
         """Complete a fresh scan of all four neighboring directions before moving."""
         previous_status = self.status
-        clear = {}
         for index, delta in enumerate(self.DIRECTIONS, 1):
             self._set_status(f"scanning_{index}_of_{len(self.DIRECTIONS)}")
             neighbor = (node[0] + delta[0], node[1] + delta[1])
-            clear[delta] = self._can_step(node, neighbor)
+            self._can_step(node, neighbor)
+        with self.lock:
+            clear = {delta: self.wall_grid.can_cross(node, delta) for delta in self.DIRECTIONS}
         self._set_status(previous_status)
         return clear
 
@@ -211,6 +229,7 @@ class DFSExplorer:
                              abort_event=self.slam_worker.abort_event)
         with self.lock:
             self.moves += 1
+            self.current_cell = tuple(destination)
         deadline = time.monotonic() + self.settings["sample_timeout_s"] * 2
         while time.monotonic() < deadline:
             if (self.map.latest_scan_timestamp or 0.0) > previous_scan:
@@ -219,7 +238,7 @@ class DFSExplorer:
         raise TimeoutError("no fresh SLAM scan arrived after moving to a cell")
 
     def run(self, slam_worker):
-        """Explore ToF-clear neighboring cells and backtrack when exhausted."""
+        """Explore open grid edges with fresh clearance, then backtrack."""
         self.slam_worker = slam_worker
         try:
             self._set_status("starting")
@@ -229,6 +248,7 @@ class DFSExplorer:
                 raise RuntimeError("SLAM has no initial pose")
             with self.lock:
                 self.base_pose = tuple(pose)
+                self.wall_grid.cells.add((0, 0))
             root = (0, 0)
             with self.lock:
                 self.stack = [root]
@@ -258,10 +278,8 @@ class DFSExplorer:
                 next_node = None
                 for delta in self.DIRECTIONS:
                     neighbor = (current[0] + delta[0], current[1] + delta[1])
-                    edge = (current, neighbor)
-                    if neighbor in self.visited or edge in self.attempted_edges:
+                    if neighbor in self.visited:
                         continue
-                    self.attempted_edges.add(edge)
                     if clear[delta] and self._can_step(current, neighbor):
                         next_node = neighbor
                         break
@@ -278,7 +296,7 @@ class DFSExplorer:
                 if self.moves == 0 and len(self.stack) == 1:
                     self._set_status(
                         "no_safe_direction",
-                        "ไม่มีทิศที่ระยะ ToF ผ่านระยะก้าวและระยะเผื่อรอบหุ่น",
+                        "กริดยังไม่มีขอบทางเปิดที่ผ่านระยะเผื่อตัวหุ่นครบ",
                     )
                     return self.snapshot()
 

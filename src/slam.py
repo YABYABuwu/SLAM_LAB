@@ -34,6 +34,103 @@ def _line_cells(x0, y0, x1, y1):
             y0 += sy
 
 
+class CellWallGrid:
+    """Discrete occupancy on shared cell borders, fed only by settled scans.
+
+    Maze walls are snapped to the nearest border along a cardinal ray. Raw
+    clearance is retained separately so snapping cannot make a short ray safe.
+    """
+
+    DIRECTIONS = ((1, 0), (0, -1), (-1, 0), (0, 1))
+    SIDE_NAMES = ("x+", "y-", "x-", "y+")
+
+    def __init__(self, cell_size_m, max_ray_cells):
+        self.cell_size_m = float(cell_size_m)
+        self.max_ray_cells = max(1, int(max_ray_cells))
+        self.edges = {}
+        self.cells = set()
+        self.checks = {}
+
+    @staticmethod
+    def edge_key(node, delta):
+        neighbor = (node[0] + delta[0], node[1] + delta[1])
+        return tuple(sorted((tuple(node), neighbor)))
+
+    def state(self, node, delta):
+        return self.edges.get(self.edge_key(node, delta), {}).get("state", "unknown")
+
+    def observe(self, node, delta, hit_distance_m, range_mm, required_range_m, timestamp):
+        if delta not in self.DIRECTIONS or not math.isfinite(hit_distance_m):
+            raise ValueError("wall grid observation needs a cardinal, finite ray")
+        self.cells.add(tuple(node))
+        wall_index = max(0, int(math.floor(hit_distance_m / self.cell_size_m)))
+        for index in range(min(wall_index + 1, self.max_ray_cells)):
+            current = (node[0] + index * delta[0], node[1] + index * delta[1])
+            key = self.edge_key(current, delta)
+            self.cells.update(key)
+            self.edges[key] = {
+                "state": "wall" if index == wall_index else "open",
+                "observed_at": timestamp,
+            }
+        self.checks[(tuple(node), delta)] = {
+            "range_mm": range_mm,
+            "required_range_mm": required_range_m * 1000.0,
+            "clearance_ok": range_mm / 1000.0 + 1e-9 >= required_range_m,
+            "observed_at": timestamp,
+        }
+
+    def can_cross(self, node, delta):
+        return (self.state(node, delta) == "open" and
+                self.checks.get((tuple(node), delta), {}).get("clearance_ok", False))
+
+    def snapshot(self, base_pose, current):
+        return {
+            "version": 1, "cell_size_m": self.cell_size_m,
+            "base_pose": list(base_pose) if base_pose is not None else None,
+            "current": list(current) if current is not None else None,
+            "cells": [{"index": list(node), "sides": {
+                name: {"state": self.state(node, delta),
+                       **self.checks.get((node, delta), {})}
+                for name, delta in zip(self.SIDE_NAMES, self.DIRECTIONS)
+            }} for node in sorted(self.cells)],
+        }
+
+    @classmethod
+    def validate_document(cls, grid):
+        if grid is None:
+            return
+        if (not isinstance(grid, dict) or grid.get("version") != 1 or
+                type(grid.get("cell_size_m")) not in (int, float) or
+                not math.isfinite(grid["cell_size_m"]) or grid["cell_size_m"] <= 0 or
+                not isinstance(grid.get("cells"), list) or len(grid["cells"]) > 500000):
+            raise ValueError("invalid cell wall grid metadata")
+        def pair(value):
+            return (isinstance(value, list) and len(value) == 2 and
+                    all(type(v) is int and abs(v) <= 1000000 for v in value))
+        base = grid.get("base_pose")
+        if base is not None and (not isinstance(base, list) or len(base) != 3 or
+                any(type(v) not in (int, float) or not math.isfinite(v) for v in base)):
+            raise ValueError("invalid cell wall grid base pose")
+        if grid.get("current") is not None and not pair(grid["current"]):
+            raise ValueError("invalid cell wall grid current cell")
+        seen, edges = set(), {}
+        for cell in grid["cells"]:
+            if not isinstance(cell, dict) or not pair(cell.get("index")):
+                raise ValueError("invalid cell wall grid cell")
+            node = tuple(cell["index"])
+            if node in seen or not isinstance(cell.get("sides"), dict):
+                raise ValueError("duplicate or invalid cell wall grid cell")
+            seen.add(node)
+            for name, delta in zip(cls.SIDE_NAMES, cls.DIRECTIONS):
+                side = cell["sides"].get(name)
+                if not isinstance(side, dict) or side.get("state") not in ("unknown", "open", "wall"):
+                    raise ValueError("invalid cell wall grid side")
+                key = cls.edge_key(node, delta)
+                if key in edges and edges[key] != side["state"]:
+                    raise ValueError("inconsistent shared cell wall")
+                edges[key] = side["state"]
+
+
 class OccupancyGridSLAM:
     """Build and locally scan-match a 2D occupancy grid.
 
@@ -415,6 +512,7 @@ class OccupancyGridSLAM:
             "status": "loaded", "visited": [], "stack": []})
         if not isinstance(exploration_state, dict):
             raise ValueError("map file exploration state must be an object")
+        CellWallGrid.validate_document(exploration_state.get("cell_grid"))
         try:
             json.dumps(exploration_state, allow_nan=False)
         except (TypeError, ValueError) as error:

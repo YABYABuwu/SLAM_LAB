@@ -36,6 +36,7 @@
     #map { display: block; width: 100%; height: 330px; border-radius: 9px; background: #0a1721; }
     .map-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 7px 14px; font-size: .8rem; color: #d4e4ec; background: #0a1721; border: 1px solid #315060; border-radius: 9px; padding: 9px 11px; }
     .map-info strong { color: #8af0cf; font-size: 1rem; }
+    #cell-sides { grid-column: 1 / -1; line-height: 1.6; }
     .map-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
     .map-actions button { background: #172b3a; color: #e8f2f5; border: 1px solid #365469; border-radius: 7px; padding: 5px 8px; font: inherit; font-size: .72rem; cursor: pointer; }
     .map-actions button:hover { border-color: #78c9e5; }
@@ -75,9 +76,10 @@
       <section class="card">
         <div class="card-head"><h2>แผนที่ SLAM / DFS</h2><div class="map-actions"><button id="export-json" type="button">ส่งออก JSON</button><button id="export-ros" type="button">ส่งออก ROS</button><button id="load-map" type="button">เปิด JSON</button><input id="map-file" type="file" accept="application/json,.json" hidden></div></div>
         <div class="map-wrap">
+          <label class="muted"><input id="fine-map" type="checkbox"> แสดง occupancy ละเอียด</label>
           <canvas id="map" aria-label="เส้นทาง ตำแหน่ง และทิศหุ่นยนต์"></canvas>
-          <div class="map-legend"><span class="key" style="--key:#122c39">พื้นที่ว่าง</span><span class="key" style="--key:#ffb868">สิ่งกีดขวาง</span><span class="key" style="--key:#69d9ff">เส้นทาง</span></div>
-          <div class="map-info"><div>DFS&nbsp; <strong id="dfs-status">ปิด</strong></div><div id="map-counts">รอข้อมูลแผนที่</div><div id="pose">X — · Y — · Yaw —</div><div>ความเร็ว&nbsp; <strong id="speed">— m/s</strong></div><div>Gimbal&nbsp; <span id="gimbal-map">—</span></div><div>DFS เดินตาม ToF · แผนที่ใช้แสดงผล</div><div>ทิศแผนที่: ↑ +X เหนือ · ↓ −X ใต้ · → +Y ตะวันออก</div><div id="tof-model">ToF: —</div><div id="map-message"></div></div>
+          <div class="map-legend"><span class="key" style="--key:#8cf1d2">ขอบทางเปิด</span><span class="key" style="--key:#ffb868">กำแพง</span><span class="key" style="--key:#718594">เส้นประ: ยังไม่รู้</span><span class="key" style="--key:#69d9ff">เส้นทาง</span></div>
+          <div class="map-info"><div>DFS&nbsp; <strong id="dfs-status">ปิด</strong></div><div id="map-counts">รอข้อมูลแผนที่</div><div id="pose">X — · Y — · Yaw —</div><div>ความเร็ว&nbsp; <strong id="speed">— m/s</strong></div><div>Gimbal&nbsp; <span id="gimbal-map">—</span></div><div>DFS เลือกขอบทางเปิดของกริด</div><div>ทิศแผนที่: ↑ +X เหนือ · ↓ −X ใต้ · → +Y ตะวันออก</div><div id="tof-model">ToF: —</div><div id="cell-sides"></div><div id="map-message"></div></div>
         </div>
       </section>
     </div>
@@ -210,14 +212,30 @@
 
     function drawSlamMap(ctx, w, h, map) {
       const resolution = Number(map.resolution_m);
-      const [originX, originY] = map.origin || [0, 0];
-      const worldX = map.width * resolution, worldY = map.height * resolution;
+      const grid = map.exploration?.cell_grid;
+      const hasWalls = grid?.version === 1 && grid.base_pose?.length === 3 && grid.cells?.length > 0;
+      const showFine = !hasWalls || document.getElementById("fine-map").checked;
+      const gridPoint = (x, y) => {
+        const [bx, by, yaw] = grid.base_pose, a = yaw * Math.PI / 180, size = grid.cell_size_m;
+        return [bx + size * (x * Math.cos(a) - y * Math.sin(a)), by + size * (x * Math.sin(a) + y * Math.cos(a))];
+      };
+      let [originX, originY] = map.origin || [0, 0];
+      let worldX = map.width * resolution, worldY = map.height * resolution;
+      if (hasWalls && !showFine) {
+        let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+        for (const c of grid.cells) for (const d of [[-.5,-.5],[-.5,.5],[.5,.5],[.5,-.5]]) {
+          const p=gridPoint(c.index[0]+d[0],c.index[1]+d[1]);
+          minX=Math.min(minX,p[0]); minY=Math.min(minY,p[1]); maxX=Math.max(maxX,p[0]); maxY=Math.max(maxY,p[1]);
+        }
+        const pad=grid.cell_size_m*.2;
+        originX=minX-pad; originY=minY-pad; worldX=maxX-minX+2*pad; worldY=maxY-minY+2*pad;
+      }
       const scale = Math.min((w - 28) / worldY, (h - 28) / worldX);
       const drawnW = worldY * scale, drawnH = worldX * scale;
       const left = (w - drawnW) / 2, bottom = (h + drawnH) / 2;
       const cell = Math.max(1, resolution * scale);
       ctx.fillStyle = "#09141d"; ctx.fillRect(left, bottom - drawnH, drawnW, drawnH);
-      for (let iy = 0; iy < map.height; iy++) {
+      if (showFine) for (let iy = 0; iy < map.height; iy++) {
         for (let ix = 0; ix < map.width; ix++) {
           const value = map.data[iy * map.width + ix];
           if (value < 0) continue;
@@ -226,13 +244,41 @@
         }
       }
       ctx.strokeStyle = "#29404f"; ctx.lineWidth = 1;
-      for (let meter = 0; meter <= Math.max(worldX, worldY); meter++) {
+      if (showFine) for (let meter = 0; meter <= Math.max(worldX, worldY); meter++) {
         const x = left + meter * scale, y = bottom - meter * scale;
         if (meter <= worldY) { ctx.beginPath(); ctx.moveTo(x, bottom - drawnH); ctx.lineTo(x, bottom); ctx.stroke(); }
         if (meter <= worldX) { ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(left + drawnW, y); ctx.stroke(); }
       }
       const project = point => [left + (point[1] - originY) * scale,
         bottom - (point[0] - originX) * scale];
+      if (hasWalls) {
+        const endpoints = {"x+": [[.5,-.5],[.5,.5]], "x-": [[-.5,-.5],[-.5,.5]], "y+": [[-.5,.5],[.5,.5]], "y-": [[-.5,-.5],[.5,-.5]]};
+        for (const c of grid.cells) {
+          const [ix, iy] = c.index;
+          if (grid.current?.[0] === ix && grid.current?.[1] === iy) {
+            ctx.beginPath();
+            [[-.5,-.5],[-.5,.5],[.5,.5],[.5,-.5]].forEach((d,i) => {const p=project(gridPoint(ix+d[0],iy+d[1])); if(i) ctx.lineTo(...p); else ctx.moveTo(...p);});
+            ctx.closePath(); ctx.fillStyle="#194437"; ctx.fill();
+          }
+          for (const [name, ends] of Object.entries(endpoints)) {
+            const state = c.sides[name]?.state || "unknown";
+            ctx.strokeStyle = state === "wall" ? "#ffb868" : state === "open" ? "#8cf1d255" : "#718594";
+            ctx.lineWidth = state === "wall" ? 4 : 1;
+            ctx.setLineDash(state === "unknown" ? [4,4] : []);
+            ctx.beginPath(); ctx.moveTo(...project(gridPoint(ix+ends[0][0],iy+ends[0][1]))); ctx.lineTo(...project(gridPoint(ix+ends[1][0],iy+ends[1][1]))); ctx.stroke();
+          }
+          ctx.setLineDash([]);
+          if (grid.cell_size_m * scale >= 32) {
+            const p=project(gridPoint(ix,iy)); ctx.fillStyle="#a9bfcb"; ctx.textAlign="center"; ctx.font="10px system-ui"; ctx.fillText(`${ix},${iy}`,p[0],p[1]+14);
+          }
+        }
+        const current=grid.cells.find(c => c.index[0]===grid.current?.[0] && c.index[1]===grid.current?.[1]);
+        const labels={"x+":"หน้า +X", "y-":"ซ้าย −Y", "x-":"หลัง −X", "y+":"ขวา +Y"};
+        document.getElementById("cell-sides").textContent = `ช่อง ${grid.current?.join(",")} · ${grid.cell_size_m.toFixed(2)} ม. · ` + Object.entries(labels).map(([key,label]) => {
+          const side=current?.sides[key]; const state=side?.state;
+          return `${label}: ${state === "wall" ? "กำแพง" : state === "open" ? (side?.clearance_ok === false ? "เปิด แต่ระยะไม่พอ" : "เปิด") : "ยังไม่รู้"}`;
+        }).join(" · ");
+      } else document.getElementById("cell-sides").textContent="ยังไม่มีกริดกำแพงจากการสแกนครบด้าน";
       const route = map.trajectory || [];
       if (route.length) {
         ctx.beginPath();
@@ -260,7 +306,7 @@
           const offsetDirection = direction + Number(sensor.offset_yaw_deg || 0) * Math.PI / 180;
           const sensorWorldX = map.pose[0] + pivotX * Math.cos(yaw) - pivotY * Math.sin(yaw) + offset * Math.cos(offsetDirection);
           const sensorWorldY = map.pose[1] + pivotX * Math.sin(yaw) + pivotY * Math.cos(yaw) + offset * Math.sin(offsetDirection);
-          const [sensorX, sensorY] = project(sensorWorldX, sensorWorldY);
+          const [sensorX, sensorY] = project([sensorWorldX, sensorWorldY]);
           ctx.beginPath(); ctx.moveTo(sensorX, sensorY);
           ctx.lineTo(sensorX + Math.sin(direction) * 20, sensorY - Math.cos(direction) * 20);
           ctx.strokeStyle = "#8df3d3"; ctx.lineWidth = 3; ctx.stroke();
@@ -277,7 +323,8 @@
         document.getElementById("speed").textContent = `${number(Math.hypot(dx, dy) / (newest[1] - older[1]))} m/s`;
       } else document.getElementById("speed").textContent = "— m/s";
       const counts = map.counts || {};
-      document.getElementById("map-counts").textContent = `ว่าง ${counts.free_cells ?? 0} · กีดขวาง ${counts.occupied_cells ?? 0} · ไม่รู้จัก ${counts.unknown_cells ?? 0}`;
+      const wallCount = hasWalls ? grid.cells.reduce((sum,c) => sum + Object.values(c.sides).filter(s => s.state === "wall").length, 0) / 2 : 0;
+      document.getElementById("map-counts").textContent = hasWalls && !showFine ? `${grid.cells.length} ช่อง · ${wallCount} ขอบกำแพง` : `ว่าง ${counts.free_cells ?? 0} · กีดขวาง ${counts.occupied_cells ?? 0} · ไม่รู้จัก ${counts.unknown_cells ?? 0}`;
       const dfsStatus = map.exploration?.status || "แสดงแผนที่";
       const scanProgress = /^scanning_(\d+)_of_(\d+)$/.exec(dfsStatus);
       document.getElementById("dfs-status").textContent = scanProgress ? `สแกน ${scanProgress[1]}/${scanProgress[2]} ทิศ` : dfsStatus;
@@ -426,6 +473,7 @@
       } finally { busy = false; }
     }
 
+    document.getElementById("fine-map").addEventListener("change", drawMap);
     window.addEventListener("resize", () => { drawMap(); Object.keys(chartCards).forEach(drawChart); });
     document.getElementById("export-json").addEventListener("click", () => { window.location.href = "/api/map/export?format=json"; });
     document.getElementById("export-ros").addEventListener("click", () => { window.location.href = "/api/map/export?format=ros"; });

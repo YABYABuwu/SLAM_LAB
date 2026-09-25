@@ -144,6 +144,7 @@ class TemplateTests(unittest.TestCase):
             module.callbacks["attitude"]((45, 0, 0))
             self.assertEqual(logger.get_latest("position"), (1, 2, 0))
             self.assertEqual(logger.get_latest("attitude"), (45, 0, 0))
+            logger.exploration_state = {"status": "completed", "cell_grid": {"cells": []}}
             logger.stop()
             with (logger.run_dir / "position.csv").open(newline="") as file:
                 self.assertEqual(len(list(csv.reader(file))), 2)
@@ -151,6 +152,7 @@ class TemplateTests(unittest.TestCase):
                 summary = json.load(file)
             self.assertEqual(summary["received_rows"]["position"], 1)
             self.assertEqual(summary["dropped_csv_rows"], 0)
+            self.assertEqual(summary["exploration"], logger.exploration_state)
             self.assertFalse((logger.run_dir / "attitude.csv").exists())
             self.assertEqual(module.callbacks, {})
 
