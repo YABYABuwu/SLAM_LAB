@@ -76,7 +76,7 @@
         <div class="card-head"><h2>แผนที่ SLAM / DFS</h2><div class="map-actions"><button id="export-json" type="button">ส่งออก JSON</button><button id="export-ros" type="button">ส่งออก ROS</button><button id="load-map" type="button">เปิด JSON</button><input id="map-file" type="file" accept="application/json,.json" hidden></div></div>
         <div class="map-wrap">
           <canvas id="map" aria-label="เส้นทาง ตำแหน่ง และทิศหุ่นยนต์"></canvas>
-          <div class="map-info"><div>DFS&nbsp; <strong id="dfs-status">ปิด</strong></div><div id="map-counts">รอข้อมูลแผนที่</div><div id="pose">X — · Y — · Yaw —</div><div>ความเร็ว&nbsp; <strong id="speed">— m/s</strong></div><div>Gimbal&nbsp; <span id="gimbal-map">—</span></div><div id="tof-model">ToF: —</div><div id="map-message"></div></div>
+          <div class="map-info"><div>DFS&nbsp; <strong id="dfs-status">ปิด</strong></div><div id="map-counts">รอข้อมูลแผนที่</div><div id="pose">X — · Y — · Yaw —</div><div>ความเร็ว&nbsp; <strong id="speed">— m/s</strong></div><div>Gimbal&nbsp; <span id="gimbal-map">—</span></div><div>แผนที่: +X หน้า · +Y ขวา · yaw + ไปทาง +Y</div><div id="tof-model">ToF: —</div><div id="map-message"></div></div>
           <div class="map-legend"><span class="key" style="--key:#122c39">พื้นที่ว่าง</span><span class="key" style="--key:#ffb868">สิ่งกีดขวาง</span><span class="key" style="--key:#69d9ff">เส้นทาง</span></div>
         </div>
       </section>

@@ -282,6 +282,25 @@ class ExplorationTests(unittest.TestCase):
         self.assertEqual(result["moves"], 0)
         self.assertEqual(chassis.commands, [])
 
+    def test_gimbal_chooses_nearest_startup_frame_yaw_at_half_turn(self):
+        slam_map = OccupancyGridSLAM(self.settings)
+        slam_map.update((0, 0, 0), 2000, gimbal_yaw_deg=90)
+        logger = FakeLogger()
+        logger.set("attitude", (0, 0, 0))
+        gimbal = SimulatedGimbal(slam_map, logger, 2000)
+        gimbal.yaw = 90
+        logger.set("gimbal", (0, 90, 0, 90))
+        explorer = DFSExplorer(None, gimbal, logger, slam_map, self.settings)
+        explorer.base_pose = (0, 0, 0)
+        explorer.slam_worker = FakeSlamWorker()
+
+        measured_mm, world_yaw = explorer._scan_for_direction((-1, 0))
+
+        self.assertEqual(measured_mm, 2000)
+        self.assertEqual(world_yaw, 180)
+        self.assertAlmostEqual(gimbal.commands[-1][1], 180)
+        self.assertAlmostEqual(explorer._command_yaw(-30, 0, 10), -20)
+
     def test_dfs_explores_and_backtracks_inside_a_simulated_room(self):
         range_provider = lambda pose, yaw: self.room_range(pose, yaw, half_extent=1.6)
         slam_map = OccupancyGridSLAM(self.settings)

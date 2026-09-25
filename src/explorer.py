@@ -65,9 +65,20 @@ class DFSExplorer:
 
     def _gimbal_sample(self):
         sample = self.logger.get_sample("gimbal", max_age_s=self.settings["sample_timeout_s"])
-        if sample is None or len(sample[0]) < 2:
-            raise TimeoutError("gimbal angle data is missing or stale during exploration")
-        return float(sample[0][1]), float(sample[1])
+        if sample is None or len(sample[0]) < 4:
+            raise TimeoutError("complete gimbal angle data is missing or stale during exploration")
+        return float(sample[0][1]), float(sample[0][3]), float(sample[1])
+
+    @staticmethod
+    def _command_yaw(target_relative_yaw, current_relative_yaw, current_ground_yaw):
+        """Convert chassis-relative target to the SDK's startup-frame moveto angle."""
+        shortest_turn = _wrap_degrees(target_relative_yaw - current_relative_yaw)
+        desired_ground = current_ground_yaw + shortest_turn
+        candidates = (desired_ground - 360.0, desired_ground, desired_ground + 360.0)
+        reachable = [angle for angle in candidates if -250.0 <= angle <= 250.0]
+        if not reachable:
+            raise RuntimeError("gimbal cannot reach the requested direction within its yaw limits")
+        return min(reachable, key=lambda angle: abs(angle - current_ground_yaw))
 
     def _scan_for_direction(self, delta):
         """Point the single ToF toward a candidate cell and wait for its new scan."""
@@ -80,26 +91,30 @@ class DFSExplorer:
         target_yaw = _wrap_degrees(
             world_yaw - body_yaw - float(sensor["yaw_offset_deg"])
         )
-        self._gimbal_sample()
+        current_yaw, current_ground_yaw, _ = self._gimbal_sample()
+        command_yaw = self._command_yaw(target_yaw, current_yaw, current_ground_yaw)
         request_time = time.time()
         tolerance = self.settings["gimbal"]["angle_tolerance_deg"]
         self.gimbal.moveto(
             pitch=self.settings["gimbal"]["pitch_deg"],
-            yaw=target_yaw,
+            yaw=command_yaw,
             pitch_speed=30,
             yaw_speed=self.settings["gimbal"]["yaw_speed_deg_s"],
         )
 
+        expected_motion_s = abs(command_yaw - current_ground_yaw) / self.settings["gimbal"]["yaw_speed_deg_s"]
         deadline = time.monotonic() + (
-            self.settings["gimbal"]["move_timeout_s"] +
+            max(self.settings["gimbal"]["move_timeout_s"], expected_motion_s + 0.5) +
             self.settings["gimbal"]["scan_timeout_s"]
         )
         aligned = False
+        measured_yaw = current_yaw
+        scan_yaw = self.map.latest_gimbal_yaw_deg
         while time.monotonic() < deadline:
             worker_status = self.slam_worker.status() if self.slam_worker is not None else None
             if worker_status is not None and worker_status["error"]:
                 raise RuntimeError(worker_status["error"])
-            measured_yaw, angle_timestamp = self._gimbal_sample()
+            measured_yaw, _, angle_timestamp = self._gimbal_sample()
             aligned = (angle_timestamp > request_time and
                        abs(_wrap_degrees(target_yaw - measured_yaw)) <= tolerance)
 
@@ -112,10 +127,12 @@ class DFSExplorer:
                     abs(_wrap_degrees(target_yaw - scan_yaw)) <= tolerance and
                     scan_range is not None and
                     time.time() - scan_timestamp <= self.settings["sample_timeout_s"] * 2):
-                return float(scan_range), target_yaw
+                return float(scan_range), world_yaw
             time.sleep(0.03)
         raise TimeoutError(
-            f"gimbal did not settle and produce a fresh ToF scan at {target_yaw:.1f} degrees"
+            f"gimbal scan timed out: relative target {target_yaw:.1f}°, "
+            f"SDK command {command_yaw:.1f}°, relative actual {measured_yaw:.1f}°, "
+            f"last mapped scan yaw {scan_yaw if scan_yaw is not None else 'none'}°"
         )
 
     def _can_step(self, node, destination):

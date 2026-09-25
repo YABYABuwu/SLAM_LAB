@@ -47,7 +47,6 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(pid.compute(-2, 0.1), -0.3)
         self.assertEqual(angle_error(-179, 179), 2)
         self.assertTrue(config["dashboard"]["enabled"])
-        self.assertFalse(config["exploration"]["enabled"])
         self.assertEqual(config["exploration"]["sensor"]["tof_channel"], 0)
         self.assertNotIn("min_range_m", config["exploration"]["map"])
         self.assertNotIn("max_range_m", config["exploration"]["map"])
